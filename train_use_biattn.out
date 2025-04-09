@@ -1,0 +1,116 @@
+
+Parameters:
+	aspect=0
+	batch_size=128
+	cell_type=GRU
+	cls_lambda=0.9
+	continuity_lambda=6.0
+	correlated=1
+	dis_lr=0
+	div=kl
+	dropout=0.2
+	embedding_dim=512
+	epochs=150
+	gpu=0
+	hidden_dim=200
+	if_biattn=True
+	lay=True
+	lr=0.0001
+	model_type=sp
+	num_class=2
+	num_layers=1
+	output_dir=./res
+	save=0
+	seed=12252018
+	share=0
+	sparsity_lambda=6.0
+	sparsity_percentage=0.175
+	writer=train_use_biattn
+
+Train time for epoch #0 : 144.844183 second
+traning epoch:0 recall:0.5330 precision:0.5488 f1-score:0.5408 accuracy:0.5440
+Validate
+tensor(618) tensor(1051) tensor(780) tensor(298)
+dev epoch:0 recall:0.4421 precision:0.6747 f1-score:0.5341 accuracy:0.6076
+Validate Sentence
+dev dataset : recall:0.4549 precision:0.8525 f1-score:0.5933 accuracy:0.6826
+
+Train time for epoch #1 : 144.800960 second
+traning epoch:1 recall:0.5913 precision:0.5866 f1-score:0.5890 accuracy:0.5842
+Validate
+tensor(1070) tensor(651) tensor(328) tensor(698)
+dev epoch:1 recall:0.7654 precision:0.6052 f1-score:0.6759 accuracy:0.6265
+Validate Sentence
+dev dataset : recall:0.6438 precision:0.7557 f1-score:0.6952 accuracy:0.7128
+
+Train time for epoch #2 : 145.566074 second
+traning epoch:2 recall:0.6297 precision:0.6217 f1-score:0.6257 accuracy:0.6204
+Validate
+tensor(859) tensor(962) tensor(539) tensor(387)
+dev epoch:2 recall:0.6144 precision:0.6894 f1-score:0.6498 accuracy:0.6629
+Validate Sentence
+dev dataset : recall:0.5815 precision:0.8130 f1-score:0.6781 accuracy:0.7190
+
+Train time for epoch #3 : 145.923884 second
+traning epoch:3 recall:0.6506 precision:0.6386 f1-score:0.6446 accuracy:0.6385
+Validate
+tensor(979) tensor(828) tensor(419) tensor(521)
+dev epoch:3 recall:0.7003 precision:0.6527 f1-score:0.6756 accuracy:0.6578
+Validate Sentence
+dev dataset : recall:0.6753 precision:0.7886 f1-score:0.7276 accuracy:0.7426
+
+Train time for epoch #4 : 146.033468 second
+traning epoch:4 recall:0.6507 precision:0.6597 f1-score:0.6551 accuracy:0.6550
+Validate
+tensor(1021) tensor(812) tensor(377) tensor(537)
+dev epoch:4 recall:0.7303 precision:0.6553 f1-score:0.6908 accuracy:0.6673
+Validate Sentence
+dev dataset : recall:0.7868 precision:0.7432 f1-score:0.7644 accuracy:0.7532
+
+Train time for epoch #5 : 146.790100 second
+traning epoch:5 recall:0.6594 precision:0.6686 f1-score:0.6640 accuracy:0.6639
+Validate
+tensor(909) tensor(986) tensor(489) tensor(363)
+dev epoch:5 recall:0.6502 precision:0.7146 f1-score:0.6809 accuracy:0.6898
+Validate Sentence
+dev dataset : recall:0.6295 precision:0.8445 f1-score:0.7213 accuracy:0.7525
+
+Train time for epoch #6 : 145.424687 second
+traning epoch:6 recall:0.6633 precision:0.6778 f1-score:0.6705 accuracy:0.6716
+Validate
+tensor(858) tensor(1036) tensor(540) tensor(313)
+dev epoch:6 recall:0.6137 precision:0.7327 f1-score:0.6680 accuracy:0.6895
+Validate Sentence
+dev dataset : recall:0.6474 precision:0.8387 f1-score:0.7307 accuracy:0.7572
+
+Train time for epoch #7 : 145.621469 second
+traning epoch:7 recall:0.6524 precision:0.6861 f1-score:0.6689 accuracy:0.6745
+Validate
+tensor(935) tensor(927) tensor(463) tensor(422)
+dev epoch:7 recall:0.6688 precision:0.6890 f1-score:0.6788 accuracy:0.6778
+Validate Sentence
+dev dataset : recall:0.6867 precision:0.8233 f1-score:0.7488 accuracy:0.7656
+
+Train time for epoch #8 : 146.274006 second
+traning epoch:8 recall:0.6473 precision:0.6814 f1-score:0.6639 accuracy:0.6697
+Validate
+tensor(890) tensor(981) tensor(508) tensor(368)
+dev epoch:8 recall:0.6366 precision:0.7075 f1-score:0.6702 accuracy:0.6811
+Validate Sentence
+dev dataset : recall:0.6867 precision:0.8326 f1-score:0.7526 accuracy:0.7703
+
+Train time for epoch #9 : 145.758273 second
+traning epoch:9 recall:0.6495 precision:0.6869 f1-score:0.6677 accuracy:0.6742
+Validate
+tensor(878) tensor(972) tensor(520) tensor(377)
+dev epoch:9 recall:0.6280 precision:0.6996 f1-score:0.6619 accuracy:0.6735
+Validate Sentence
+dev dataset : recall:0.6888 precision:0.8418 f1-score:0.7577 accuracy:0.7758
+
+Train time for epoch #10 : 207.422664 second
+traning epoch:10 recall:0.6499 precision:0.6916 f1-score:0.6701 accuracy:0.6777
+Validate
+tensor(868) tensor(1003) tensor(530) tensor(346)
+dev epoch:10 recall:0.6209 precision:0.7150 f1-score:0.6646 accuracy:0.6811
+Validate Sentence
+dev dataset : recall:0.6989 precision:0.8336 f1-score:0.7603 accuracy:0.7758
