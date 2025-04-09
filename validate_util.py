@@ -36,5 +36,6 @@ def validate_dev_sentence(model, dev_loader, device,writer_epoch):
 
     print("dev dataset : recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}".format(recall, precision,
                                                                                                 f1_score, accuracy))
-    writer.add_scalar('./sent_acc',accuracy,epoch)
+    if writer is not None or epoch is not None:
+        writer.add_scalar('./sent_acc',accuracy,epoch)
     return f1_score,accuracy

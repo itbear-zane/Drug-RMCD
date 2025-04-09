@@ -33,7 +33,7 @@ def mkdir(path):
     if not is_exists:
         os.makedirs(path)
         
-def evaluate(model, dev_loader):
+def evaluate(model, dev_loader, writer, epoch):
     TP = 0
     TN = 0
     FN = 0

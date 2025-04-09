@@ -15,7 +15,16 @@ def parse():
         description="")
 
     # dataset parameters
-    
+    parser.add_argument('--test',
+                        action='store_true',
+                        help='only test')
+    parser.add_argument('--resume',
+                        action='store_true',
+                        help='resume training states')
+    parser.add_argument('--checkpoint_path',
+                        type=str,
+                        default='',
+                        help='model weight path')
     parser.add_argument('--aspect',
                         type=int,
                         default=0,
@@ -32,20 +41,19 @@ def parse():
                         type=int,
                         default=256,
                         help='Batch size [default: 100]')
-
+    parser.add_argument('--save_interval',
+                        type=int,
+                        default=10,
+                        help='save_interval [default: 10]')
 
     # model parameters
-    parser.add_argument('--save',
-                        type=int,
-                        default=0,
-                        help='save model, 0:do not save, 1:save')
     parser.add_argument('--if_biattn',
                         action='store_true',
                         help='if use biattention in embedding')
     parser.add_argument('--div',
                         type=str,
                         default='kl',
-                        help='save model, 0:do not save, 1:save')
+                        help='kl loss')
     parser.add_argument('--cell_type',
                         type=str,
                         default="GRU",
@@ -78,12 +86,6 @@ def parse():
                         type=str,
                         default='sp',
                         help='Number of predicted classes [default: 2]')
-
-    # ckpt parameters
-    parser.add_argument('--output_dir',
-                        type=str,
-                        default='./res',
-                        help='Base dir of output files')
 
     # learning parameters
     parser.add_argument('--dis_lr',
@@ -132,12 +134,6 @@ def parse():
     args = parser.parse_args()
     return args
 
-
-#####################
-# set random seed
-#####################
-# torch.manual_seed(args.seed)
-
 #####################
 # parse arguments
 #####################
@@ -168,6 +164,22 @@ model=Sp_norm_model(args)
 model.to(device)
 
 ######################
+# Test
+#####################
+if args.test:
+    if os.path.exists(args.checkpoint_path):
+        checkpoint = torch.load(args.checkpoint_path, map_location=device)  # 加载权重文件
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        print(f"Model loaded from {args.checkpoint_path}")
+        precision, recall, f1_score, accuracy = evaluate(model, test_loader, None, None)
+        print("test results: recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}"\
+            .format(recall, precision, f1_score, accuracy))
+        raise ValueError("Testing stops... Don't worry!")
+    else:
+        raise ValueError(f"{args.checkpoint_path} does not exist!")
+
+######################
 # Training
 #####################
 # g_para=list(map(id, model.generator.parameters()))
@@ -184,23 +196,25 @@ for p in model.cls_fc.parameters():
     if p.requires_grad==True:
         p_para.append(p)
 
-
-# print('g_para={}'.format(g_para))
-# print('p_para={}'.format(p_para))
 lr2=args.lr
 lr1=args.lr
 
-# para=[
-#     {'params': model.generator.parameters(), 'lr':lr1},
-#     {'params':p_para,'lr':lr2}
-# ]
 g_para=filter(lambda p: p.requires_grad==True, model.generator.parameters())
 para_gen=[{'params': g_para, 'lr':lr1}]
-para_pred=[{'params':p_para,'lr':lr2}]
-
+para_pred=[{'params': p_para,'lr':lr2}]
 
 optimizer_gen = torch.optim.Adam(para_gen)
-optimizer_pred=torch.optim.Adam(para_pred)
+optimizer_pred = torch.optim.Adam(para_pred)
+
+if args.resume:
+    if os.path.exists(args.checkpoint_path):
+        print(f"Reumse training from {args.checkpoint_path}")
+        checkpoint = torch.load(args.checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer_gen.load_state_dict(checkpoint['optimizer_gen_state_dict'])
+        optimizer_pred.load_state_dict(checkpoint['optimizer_pred_state_dict'])
+    else:
+        raise ValueError(f"{args.checkpoint_path} does not exist!")
 
 ######################
 # Training
@@ -227,7 +241,7 @@ for epoch in range(args.epochs):
     writer.add_scalar('train_acc',accuracy,epoch)
     writer.add_scalar('time',time.time()-strat_time,epoch)
     
-    precision, recall, f1_score, accuracy = evaluate(model, dev_loader)
+    precision, recall, f1_score, accuracy = evaluate(model, dev_loader, writer, epoch)
     print("val epoch:{} recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}".format(epoch, recall,
                                                                                                    precision,
                                                                                                    f1_score, accuracy))
@@ -235,50 +249,14 @@ for epoch in range(args.epochs):
     if accuracy > acc_best_dev[-1]:
         acc_best_dev.append(accuracy)
         best_dev_epoch.append(epoch)
-        
-    # TP = 0
-    # TN = 0
-    # FN = 0
-    # FP = 0
-    # model.eval()
-    # print("Validate")
-    # with torch.no_grad():
-    #     for (batch, (inputs, masks, labels)) in enumerate(dev_loader):
-    #         # inputs, masks, labels = inputs.to(device), masks.to(device), labels.to(device)
-    #         inputs, masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.to(device)
-    #         _, logits = model(inputs, masks)
-    #         # pdb.set_trace()
-    #         logits = torch.softmax(logits, dim=-1)
-    #         _, pred = torch.max(logits, axis=-1)
-    #         # compute accuarcy
-    #         # TP predict 和 label 同时为1
-    #         TP += ((pred == 1) & (labels == 1)).cpu().sum()
-    #         # TN predict 和 label 同时为0
-    #         TN += ((pred == 0) & (labels == 0)).cpu().sum()
-    #         # FN predict 0 label 1
-    #         FN += ((pred == 0) & (labels == 1)).cpu().sum()
-    #         # FP predict 1 label 0
-    #         FP += ((pred == 1) & (labels == 0)).cpu().sum()
-    #     print(TP, TN, FN, FP)
-    #     precision = TP / (TP + FP)
-    #     recall = TP / (TP + FN)
-    #     f1_score = 2 * precision * recall / (recall + precision)
-    #     accuracy = (TP + TN) / (TP + TN + FP + FN)
-    #     print("dev epoch:{} recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}".format(epoch, recall,
-    #                                                                                                precision,
-    #                                                                                                f1_score, accuracy))
-
-    #     writer.add_scalar('dev_acc',accuracy,epoch)
-    #     print("Validate Sentence")
-    #     validate_dev_sentence(model, dev_loader, device,(writer,epoch))
-        
-    #     if accuracy>acc_best_dev[-1]:
-    #         acc_best_dev.append(accuracy)
-    #         best_dev_epoch.append(epoch)
 
     # 检查是否需要保存模型
-    if (epoch + 1) % save_interval == 0:
-        save_path = os.path.join(args.output_dir, f'model_epoch_{epoch}.pth')
+    if (epoch + 1) % args.save_interval == 0:
+        precision, recall, f1_score, accuracy = evaluate(model, test_loader, None, None)
+        print("test epoch:{} recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}".format(epoch, recall,
+                                                                                                    precision,
+                                                                                                    f1_score, accuracy))
+        save_path = os.path.join(args.writer, f'model_epoch_{epoch}.pth')
         torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
