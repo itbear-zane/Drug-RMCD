@@ -211,11 +211,13 @@ para_pred=[{'params': p_para,'lr':lr2}]
 optimizer_gen = torch.optim.Adam(para_gen)
 optimizer_pred = torch.optim.Adam(para_pred)
 
+start_epoch = 0
 if args.resume:
     if os.path.exists(args.checkpoint_path):
         print(f"Reumse training from {args.checkpoint_path}")
         checkpoint = torch.load(args.checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint['model_state_dict'])
+        start_epoch = checkpoint['epoch']
         optimizer_gen.load_state_dict(checkpoint['optimizer_gen_state_dict'])
         optimizer_pred.load_state_dict(checkpoint['optimizer_pred_state_dict'])
     else:
@@ -231,7 +233,7 @@ best_dev_epoch = [0]
 acc_best_dev = [0]
 grad=[]
 grad_loss=[]
-for epoch in range(args.epochs):
+for epoch in range(start_epoch, args.epochs):
 
     start = time.time()
     model.train()
