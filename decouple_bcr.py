@@ -248,8 +248,8 @@ for epoch in range(start_epoch, args.epochs):
     writer.add_scalar('train_acc',accuracy,epoch)
     writer.add_scalar('time',time.time()-strat_time,epoch)
     
-    auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, writer, epoch)
-    print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
+    auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, dev_loader, writer, epoch)
+    print("val results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
 
     writer.add_scalar('dev_acc',accuracy,epoch)

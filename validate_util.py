@@ -48,5 +48,5 @@ def validate_dev_sentence(model, dev_loader, device,writer_epoch):
     print("validate_dev_sentence dataset : auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
         .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
     if writer is not None or epoch is not None:
-        writer.add_scalar('./sent_acc',accuracy,epoch)
+        writer.add_scalar('sent_acc',accuracy,epoch)
     return f1_score,accuracy
