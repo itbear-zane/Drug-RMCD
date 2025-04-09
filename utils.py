@@ -3,6 +3,7 @@ import random
 import numpy as np
 import torch
 from validate_util import validate_dev_sentence
+from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix
 
 
 def set_seed(seed=1000):
@@ -38,6 +39,8 @@ def evaluate(model, dev_loader, writer, epoch):
     TN = 0
     FN = 0
     FP = 0
+    y_labels = []
+    y_preds = []
     model.eval()
     device = "cuda:0"
     print("Validate")
@@ -49,6 +52,10 @@ def evaluate(model, dev_loader, writer, epoch):
             # pdb.set_trace()
             logits = torch.softmax(logits, dim=-1)
             _, pred = torch.max(logits, axis=-1)
+
+            y_labels += labels.cpu().numpy().tolist()
+            y_preds += pred.cpu().numpy().tolist()
+            
             # compute accuarcy
             # TP predict 和 label 同时为1
             TP += ((pred == 1) & (labels == 1)).cpu().sum()
@@ -64,7 +71,15 @@ def evaluate(model, dev_loader, writer, epoch):
         f1_score = 2 * precision * recall / (recall + precision)
         accuracy = (TP + TN) / (TP + TN + FP + FN)
         
+        y_labels, y_preds = np.array(y_labels), np.array(y_preds)
+        auroc = roc_auc_score(y_labels, y_preds)
+        auprc = average_precision_score(y_labels, y_preds)
+        
+        cm1 = confusion_matrix(y_labels, y_preds)
+        sensitivity = cm1[0, 0] / (cm1[0, 0] + cm1[0, 1])
+        specificity = cm1[1, 1] / (cm1[1, 0] + cm1[1, 1])
+        
         print("Validate Sentence")
         validate_dev_sentence(model, dev_loader, device,(writer,epoch))
         
-        return precision, recall, f1_score, accuracy
+        return auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity

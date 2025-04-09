@@ -1,5 +1,6 @@
 import argparse
 import os
+import glob
 import time
 import torch
 from embedding import get_embeddings,get_glove_embedding
@@ -41,6 +42,10 @@ def parse():
                         type=int,
                         default=256,
                         help='Batch size [default: 100]')
+    parser.add_argument('--num_workers',
+                        type=int,
+                        default=5,
+                        help='Num workers [default: 5]')
     parser.add_argument('--save_interval',
                         type=int,
                         default=10,
@@ -153,7 +158,7 @@ torch.cuda.manual_seed(args.seed)
 ######################
 # load dataset
 ######################
-train_loader, dev_loader, test_loader = get_dataloader('biosnap', 'random', batch_size=args.batch_size, num_workers=5)
+train_loader, dev_loader, test_loader = get_dataloader('biosnap', 'random', batch_size=args.batch_size, num_workers=args.num_workers)
 
 ######################
 # load model
@@ -172,9 +177,9 @@ if args.test:
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
         print(f"Model loaded from {args.checkpoint_path}")
-        precision, recall, f1_score, accuracy = evaluate(model, test_loader, None, None)
-        print("test results: recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}"\
-            .format(recall, precision, f1_score, accuracy))
+        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, None, None)
+        print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
+            .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
         raise ValueError("Testing stops... Don't worry!")
     else:
         raise ValueError(f"{args.checkpoint_path} does not exist!")
@@ -241,10 +246,10 @@ for epoch in range(args.epochs):
     writer.add_scalar('train_acc',accuracy,epoch)
     writer.add_scalar('time',time.time()-strat_time,epoch)
     
-    precision, recall, f1_score, accuracy = evaluate(model, dev_loader, writer, epoch)
-    print("val epoch:{} recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}".format(epoch, recall,
-                                                                                                   precision,
-                                                                                                   f1_score, accuracy))
+    auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, writer, epoch)
+    print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
+            .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
+
     writer.add_scalar('dev_acc',accuracy,epoch)
     if accuracy > acc_best_dev[-1]:
         acc_best_dev.append(accuracy)
@@ -252,10 +257,10 @@ for epoch in range(args.epochs):
 
     # 检查是否需要保存模型
     if (epoch + 1) % args.save_interval == 0:
-        precision, recall, f1_score, accuracy = evaluate(model, test_loader, None, None)
-        print("test epoch:{} recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}".format(epoch, recall,
-                                                                                                    precision,
-                                                                                                    f1_score, accuracy))
+        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, None, None)
+        print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
+            .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
+        
         save_path = os.path.join(args.writer, f'model_epoch_{epoch}.pth')
         torch.save({
             'epoch': epoch,
@@ -264,6 +269,17 @@ for epoch in range(args.epochs):
             'optimizer_pred_state_dict': optimizer_pred.state_dict()
         }, save_path)
         print(f"Model saved at epoch {epoch} to {save_path}")
+        
+        # 获取当前目录中的所有权重文件
+        checkpoint_files = sorted(
+            glob.glob(os.path.join(args.writer, 'model_epoch_*.pth')),
+            key=os.path.getmtime  # 按修改时间排序（最早的在前）
+        )
+        # 如果权重文件数量超过最大限制，则删除最老的一个
+        if len(checkpoint_files) > 10:
+            oldest_checkpoint = checkpoint_files[0]
+            os.remove(oldest_checkpoint)
+            print(f"Deleted oldest checkpoint: {oldest_checkpoint}")
         
 print(acc_best_dev)
 print(best_dev_epoch)
