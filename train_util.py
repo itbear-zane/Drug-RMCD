@@ -5,7 +5,7 @@ import torch.nn as nn
 from metric import get_sparsity_loss, get_continuity_loss, computer_pre_rec
 import numpy as np
 import math
-
+from tqdm import tqdm
 
 class JS_DIV(nn.Module):
     def __init__(self):
@@ -29,14 +29,16 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
     js=0
     train_sp = []
     batch_len=len(dataset)
-    for (batch, (inputs, masks, labels)) in enumerate(dataset):
+    class_losses = []
+    gen_losses = []
+    _, epoch = writer_epoch
+    for (batch, (inputs, masks, labels)) in enumerate(tqdm(dataset, desc=f'Training epoch {epoch}')):
         opt_gen.zero_grad()
         opt_pred.zero_grad()
         inputs, org_masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.type(torch.LongTensor).to(device)
 
         #train classification
         rationales, masks = model.get_rationale(inputs, org_masks)
-        # print(rationales, masks)
         sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
             rationales[:, :, 1], masks, args.sparsity_percentage)
 
@@ -52,6 +54,7 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
         cls_loss = args.cls_lambda * F.cross_entropy(forward_logit, labels)
         full_text_cls_loss = args.cls_lambda * F.cross_entropy(full_text_logits, labels)
         classification_loss=cls_loss+full_text_cls_loss+sparsity_loss + continuity_loss
+        class_losses.append(classification_loss.cpu().detach().numpy())
         classification_loss.backward()
 
         opt_pred.step()
@@ -102,6 +105,7 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
         
         gen_loss = sparsity_loss + continuity_loss + jsd_loss
         gen_loss.backward()
+        gen_losses.append(gen_loss.cpu().detach().numpy())
         opt_gen.step()
         opt_gen.zero_grad()
         n1=0
@@ -139,6 +143,8 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
         cont_l += continuity_loss.cpu().item()
         js+=jsd_loss.cpu().item()
         # print(TP, TN, FN, FP)
+        print(f'avg classification_loss: {np.array(class_losses).mean()}')
+        print(f'avg gen_loss: {np.array(gen_losses).mean()}')
     precision = TP / (TP + FP)
     recall = TP / (TP + FN)
     f1_score = 2 * recall * precision / (recall + precision)

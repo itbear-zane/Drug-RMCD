@@ -26,18 +26,10 @@ def parse():
                         type=str,
                         default='',
                         help='model weight path')
-    parser.add_argument('--aspect',
-                        type=int,
-                        default=0,
-                        help='The aspect number of beer review [0, 1, 2]')
     parser.add_argument('--seed',
                         type=int,
                         default=12252018,
-                        help='The aspect number of beer review [20226666,12252018]')
-    parser.add_argument('--correlated',
-                        type=int,
-                        default=1,
-                        help='The aspect number of beer review [0, 1]')
+                        help='random seed')
     parser.add_argument('--batch_size',
                         type=int,
                         default=256,
@@ -62,7 +54,7 @@ def parse():
     parser.add_argument('--cell_type',
                         type=str,
                         default="GRU",
-                        help='Cell type: LSTM, GRU [default: GRU]')
+                        help='Cell type: LSTM, GRU, TransformerDecoder [default: GRU]')
     parser.add_argument('--num_layers',
                         type=int,
                         default=1,
@@ -144,9 +136,17 @@ def parse():
 #####################
 args = parse()
 torch.manual_seed(args.seed)
-print("\nParameters:")
-for attr, value in sorted(args.__dict__.items()):
-    print("\t{}={}".format(attr, value))
+os.makedirs(args.writer, exist_ok=True)
+# 打开一个文本文件以写入模式（'w'）
+with open(args.writer + "/parameters.txt", "w") as f:
+    # 写入标题
+    f.write("Parameters:\n")
+    print("\nParameters:")
+    
+    # 遍历 args 对象的属性并写入文件
+    for attr, value in sorted(args.__dict__.items()):
+        f.write("\t{}={}\n".format(attr, value))
+        print("\t{}={}".format(attr, value))
 
 ######################
 # device

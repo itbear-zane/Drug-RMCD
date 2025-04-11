@@ -3,6 +3,104 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
+
+class TransformerDecoderModel(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, nhead=8, dim_feedforward=2048, dropout=0.1, \
+        activation='relu', max_len=5000, num_directions=2):
+        super(TransformerDecoderModel, self).__init__()
+        
+        # 参数初始化
+        self.input_size = input_size  # 输入特征维度
+        self.hidden_size = hidden_size // num_directions  # 单向隐藏层大小
+        self.num_layers = num_layers
+        self.num_directions = num_directions  # 双向
+        
+        # Transformer 参数
+        self.d_model = hidden_size  # Transformer 的隐藏层大小
+        self.nhead = nhead  # 多头注意力头数
+        self.num_decoder_layers = num_layers  # 解码器层数
+        self.dim_feedforward = dim_feedforward  # 前馈网络维度
+        
+        # 输入线性变换层（将 input_size 映射到 d_model）
+        self.input_projection = nn.Linear(self.input_size, self.d_model)
+        
+        # Transformer 解码器
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=self.d_model,
+            nhead=self.nhead,
+            dim_feedforward=self.dim_feedforward,
+            dropout=dropout,
+            activation=activation,
+            batch_first=False  # 注意：PyTorch 默认 batch_first=False
+        )
+        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=self.num_decoder_layers)
+        
+        # 输出线性变换层（将 d_model 映射到 hidden_size * num_directions）
+        self.output_projection = nn.Linear(self.d_model, self.hidden_size * self.num_directions)
+        
+        # 位置编码
+        self.positional_encoding = PositionalEncoding(self.d_model, dropout, max_len)
+
+    def forward(self, src):
+        """
+        src: (batch_size, sequence_length, input_size)
+        """
+        batch_size, sequence_length, _ = src.size()
+        
+        # 1. 输入线性变换
+        src = self.input_projection(src)  # (batch_size, sequence_length, d_model)
+        
+        # 2. 调整维度以适应 Transformer 输入
+        src = src.permute(1, 0, 2)  # (sequence_length, batch_size, d_model)
+        
+        # 3. 添加位置编码
+        src = self.positional_encoding(src)  # (sequence_length, batch_size, d_model)
+        
+        # 4. 创建因果掩码
+        tgt_mask = self.generate_square_subsequent_mask(sequence_length).to(src.device)
+        
+        # 5. Transformer 解码器
+        memory = src  # 使用输入序列作为记忆张量
+        output = self.transformer_decoder(tgt=src, memory=memory, tgt_mask=tgt_mask)  # (sequence_length, batch_size, d_model)
+        
+        # 6. 调整维度回原始顺序
+        output = output.permute(1, 0, 2)  # (batch_size, sequence_length, d_model)
+        
+        # 7. 输出线性变换
+        output = self.output_projection(output)  # (batch_size, sequence_length, hidden_size * num_directions)
+        
+        # 8. 获取最后一个时间步的隐藏状态 h_n
+        h_n = output[:, -1, :]  # (batch_size, hidden_size * num_directions)
+        h_n = h_n.unsqueeze(0).repeat(self.num_layers * self.num_directions, 1, 1)  # (num_layers * num_directions, batch_size, hidden_size)
+        
+        return output, h_n
+
+    @staticmethod
+    def generate_square_subsequent_mask(sz):
+        """生成因果掩码"""
+        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        return mask
+
+# 位置编码模块
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(1)  # (max_len, 1, d_model)
+        
+        self.dropout = nn.Dropout(dropout)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:x.size(0), :]
+        x = self.dropout(x)
+        return x
+
 def drop_path(x, drop_prob: float = 0., training: bool = False, scale_by_keep: bool = True):
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -394,6 +492,25 @@ class Rnn(nn.Module):
         """
         h = self.rnn(x)
         return h
+    
+
+# class Classifier(nn.Module):
+#     def __init__(self, in_dim, hidden_dim, out_dim, binary=1):
+#         super(Classifier, self).__init__()
+#         self.fc1 = nn.Linear(in_dim, hidden_dim)
+#         self.bn1 = nn.BatchNorm1d(hidden_dim)
+#         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+#         self.bn2 = nn.BatchNorm1d(hidden_dim)
+#         self.fc3 = nn.Linear(hidden_dim, out_dim)
+#         self.bn3 = nn.BatchNorm1d(out_dim)
+#         self.fc4 = nn.Linear(out_dim, binary)
+
+#     def forward(self, x):
+#         x = self.bn1(F.relu(self.fc1(x)))
+#         x = self.bn2(F.relu(self.fc2(x)))
+#         x = self.bn3(F.relu(self.fc3(x)))
+#         x = self.fc4(x)
+#         return x
 
 
 class Sp_norm_model(nn.Module):
@@ -404,16 +521,20 @@ class Sp_norm_model(nn.Module):
         #                                  args.embedding_dim,
         #                                  args.pretrained_embedding)
         self.embedding_layer = DrugEmbedding(if_biattn=args.if_biattn, embed_dim=args.embedding_dim)
-        self.gen = nn.GRU(input_size=args.embedding_dim,
-                                  hidden_size=args.hidden_dim // 2,
-                                  num_layers=args.num_layers,
-                                  batch_first=True,
-                                  bidirectional=True)
-        self.cls = nn.GRU(input_size=args.embedding_dim,
-                          hidden_size=args.hidden_dim // 2,
-                          num_layers=args.num_layers,
-                          batch_first=True,
-                          bidirectional=True)
+        if args.cell_type == 'GRU':
+            self.gen = nn.GRU(input_size=args.embedding_dim,
+                                    hidden_size=args.hidden_dim // 2,
+                                    num_layers=args.num_layers,
+                                    batch_first=True,
+                                    bidirectional=True)
+            self.cls = nn.GRU(input_size=args.embedding_dim,
+                            hidden_size=args.hidden_dim // 2,
+                            num_layers=args.num_layers,
+                            batch_first=True,
+                            bidirectional=True)
+        elif args.cell_type == 'TransformerDecoder':
+            self.gen = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
+            self.cls = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
 
 
         self.cls_fc = nn.Linear(args.hidden_dim, args.num_class)
@@ -493,7 +614,7 @@ class Sp_norm_model(nn.Module):
 
         ########## Genetator ##########
         embedding = masks_ * embedding  # (batch_size, seq_length, embedding_dim)
-        gen_logits = self.generator(embedding)
+        gen_logits = self.generator(embedding) # (batch_size, seq_length, 2)
         ########## Sample ##########
         z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
         return z, masks
