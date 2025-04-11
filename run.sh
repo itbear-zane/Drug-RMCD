@@ -38,6 +38,16 @@
 #     --if_biattn \
 #     --writer logs/train_use_biattn_num_layers8
 
+# python decouple_bcr.py \
+#     --lr 0.0001 \
+#     --batch_size 16 \
+#     --gpu 0 --sparsity_percentage 0.175 --epochs 150 \
+#     --embedding_dim 512 \
+#     --num_layers 4 \
+#     --if_biattn \
+#     --cell_type TransformerDecoder \
+#     --writer logs/train_use_biattn_num_layers4_transformerdecoder
+
 python decouple_bcr.py \
     --lr 0.0001 \
     --batch_size 16 \
@@ -45,8 +55,8 @@ python decouple_bcr.py \
     --embedding_dim 512 \
     --num_layers 2 \
     --if_biattn \
-    --cell_type TransformerDecoder \
-    --writer logs/train_use_biattn_num_layers2_transformerdecoder
+    --cell_type TransformerEncoder \
+    --writer logs/train_use_biattn_num_layers4_transformerencoder
 
 # 1st no_biattn
 # python decouple_bcr.py \

@@ -3,6 +3,70 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
+class TransformerEncoderModel(nn.Module):
+    def __init__(self, input_size, hidden_size, num_layers, nhead=8, dim_feedforward=2048, dropout=0.1, \
+        activation='relu', max_len=5000, num_directions=2):
+        super(TransformerEncoderModel, self).__init__()
+        
+        # 参数初始化
+        self.input_size = input_size  # 输入特征维度
+        self.hidden_size = hidden_size // num_directions  # 单向隐藏层大小
+        self.num_layers = num_layers
+        self.num_directions = num_directions  # 双向
+        
+        # Transformer 参数
+        self.d_model = hidden_size  # Transformer 的隐藏层大小
+        self.nhead = nhead  # 多头注意力头数
+        self.num_encoder_layers = num_layers  # 编码器层数
+        self.dim_feedforward = dim_feedforward  # 前馈网络维度
+        
+        # 输入线性变换层（将 input_size 映射到 d_model）
+        self.input_projection = nn.Linear(self.input_size, self.d_model)
+        
+        # Transformer 编码器
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=self.d_model,
+            nhead=self.nhead,
+            dim_feedforward=self.dim_feedforward,
+            dropout=dropout,
+            activation=activation,
+            batch_first=False  # 注意：PyTorch 默认 batch_first=False
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=self.num_encoder_layers)
+        
+        # 输出线性变换层（将 d_model 映射到 hidden_size * num_directions）
+        self.output_projection = nn.Linear(self.d_model, self.hidden_size * self.num_directions)
+        
+        # 位置编码
+        self.positional_encoding = PositionalEncoding(self.d_model, dropout, max_len)
+
+    def forward(self, src):
+        """
+        src: (batch_size, sequence_length, input_size)
+        """
+        # 1. 输入线性变换
+        src = self.input_projection(src)  # (batch_size, sequence_length, d_model)
+        
+        # 2. 调整维度以适应 Transformer 输入
+        src = src.permute(1, 0, 2)  # (sequence_length, batch_size, d_model)
+        
+        # 3. 添加位置编码
+        src = self.positional_encoding(src)  # (sequence_length, batch_size, d_model)
+        
+        # 4. Transformer 编码器
+        output = self.transformer_encoder(src)  # (sequence_length, batch_size, d_model)
+        
+        # 5. 调整维度回原始顺序
+        output = output.permute(1, 0, 2)  # (batch_size, sequence_length, d_model)
+        
+        # 6. 输出线性变换
+        output = self.output_projection(output)  # (batch_size, sequence_length, hidden_size * num_directions)
+        
+        # 7. 获取最后一个时间步的隐藏状态 h_n
+        h_n = output[:, -1, :]  # (batch_size, hidden_size * num_directions)
+        h_n = h_n.unsqueeze(0).repeat(self.num_layers * self.num_directions, 1, 1)  # (num_layers * num_directions, batch_size, hidden_size)
+        
+        return output, h_n
 
 class TransformerDecoderModel(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, nhead=8, dim_feedforward=2048, dropout=0.1, \
@@ -535,7 +599,11 @@ class Sp_norm_model(nn.Module):
         elif args.cell_type == 'TransformerDecoder':
             self.gen = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
             self.cls = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
-
+        elif args.cell_type == 'TransformerEncoder':
+            self.gen = TransformerEncoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
+            self.cls = TransformerEncoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
+        else:
+            raise ValueError(f"{args.cell_type} is not supported!")
 
         self.cls_fc = nn.Linear(args.hidden_dim, args.num_class)
 
