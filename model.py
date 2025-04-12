@@ -457,8 +457,8 @@ class Sp_norm_model(nn.Module):
         drug_z = self.independent_straight_through_sampling(drug_gen_logits)  # (batch_size, seq_length, 2)
         prot_z = self.independent_straight_through_sampling(prot_gen_logits)  # (batch_size, seq_length, 2)
         ########## Classifier ##########
-        drug_enc_output = self.drug_encoder(drug_embedding, drug_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, prot_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
+        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=~drug_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=~prot_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
 
         if bi_attention:
             drug_enc_output, prot_enc_output = self.bi_attention(drug_enc_output,
