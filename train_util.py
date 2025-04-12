@@ -18,7 +18,7 @@ class JS_DIV(nn.Module):
         m = (0.5 * (p_s + q_s)).log()
         return 0.5 * (self.kl_div(m, p_s.log()) + self.kl_div(m, q_s.log()))
 
-def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer_epoch):
+def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writer_epoch):
     TP = 0
     TN = 0
     FN = 0
@@ -38,22 +38,30 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
         inputs, org_masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.type(torch.LongTensor).to(device)
 
         #train classification
-        rationales, masks = model.get_rationale(inputs, org_masks)
-        sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            rationales[:, :, 1], masks, args.sparsity_percentage)
+        drug_rationales, drug_masks = model.get_rationale(inputs, org_masks, type='drug')
+        prot_ratioanles, prot_masks = model.get_rationale(inputs, org_masks, type='prot')
 
-        sparsity = (torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item()
-        train_sp.append(
-            (torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item())
+        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
+            drug_rationales[:, :, 1], drug_masks, args.sparsity_percentage)
+        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
+            prot_ratioanles[:, :, 1], prot_masks, args.sparsity_percentage)
+        sparsity_loss = drug_sparsity_loss + prot_sparsity_loss
 
-        continuity_loss = args.continuity_lambda * get_continuity_loss(
-            rationales[:, :, 1])
+        train_sp.append((torch.sum(drug_rationales[:, :, 1]) / torch.sum(drug_masks)).cpu().item() + 
+            (torch.sum(prot_ratioanles[:, :, 1]) / torch.sum(prot_masks)).cpu().item())
 
-        forward_logit = model.pred_forward_logit(inputs, org_masks, torch.detach(rationales))
+        drug_continuity_loss = args.continuity_lambda * get_continuity_loss(
+            drug_rationales[:, :, 1])
+        prot_continuity_loss = args.continuity_lambda * get_continuity_loss(
+            prot_ratioanles[:, :, 1])
+        continuity_loss = drug_continuity_loss + prot_continuity_loss
+
+        forward_logit = model.pred_forward_logit(inputs, torch.detach(drug_rationales), torch.detach(prot_ratioanles))
         full_text_logits = model.train_one_step(inputs, org_masks)
         cls_loss = args.cls_lambda * F.cross_entropy(forward_logit, labels)
         full_text_cls_loss = args.cls_lambda * F.cross_entropy(full_text_logits, labels)
-        classification_loss=cls_loss+full_text_cls_loss+sparsity_loss + continuity_loss
+
+        classification_loss = cls_loss + full_text_cls_loss + sparsity_loss + continuity_loss
         class_losses.append(classification_loss.cpu().detach().numpy())
         classification_loss.backward()
 
@@ -67,25 +75,32 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
         name1=[]
         name2=[]
         name3=[]
-        for idx,p in model.cls.named_parameters():
+        name4=[]
+        for idx,p in model.drug_encoder.named_parameters():
             if p.requires_grad==True:
                 name1.append(idx)
                 p.requires_grad=False
+        for idx,p in model.prot_encoder.named_parameters():
+            if p.requires_grad==True:
+                name2.append(idx)
+                p.requires_grad=False
         for idx,p in model.cls_fc.named_parameters():
             if p.requires_grad == True:
-                name2.append(idx)
+                name3.append(idx)
                 p.requires_grad = False
-        if args.model_type!='sp':
-            for idx,p in model.layernorm2.named_parameters():
+        if args.bi_attention:
+            for idx,p in model.bi_attention.named_parameters():
                 if p.requires_grad == True:
-                    name3.append(idx)
+                    name4.append(idx)
                     p.requires_grad = False
-        # print('name1={},name2={},name3={}'.format(len(name1),len(name2),len(name3)))
+        print('name1={},name2={},name3={},name4={}'.format(len(name1), len(name2), len(name3), len(name4)))
+        
+        drug_rationales, drug_masks = model.get_rationale(inputs, org_masks, type='drug')
+        prot_ratioanles, prot_masks = model.get_rationale(inputs, org_masks, type='prot')
 
-        rationales, masks = model.get_rationale(inputs, org_masks)
+        #rationales, masks = model.get_rationale(inputs, org_masks)
 
-        forward_logit = model.pred_forward_logit(inputs, org_masks, rationales)
-
+        forward_logit = model.pred_forward_logit(inputs, drug_rationales, prot_ratioanles)
         full_text_logits = model.train_one_step(inputs, org_masks)
         if args.div=='js':
             jsd_func = JS_DIV()
@@ -93,39 +108,53 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
         elif args.div=='kl':
             jsd_loss=nn.functional.kl_div(F.softmax(forward_logit,dim=-1).log(), F.softmax(full_text_logits,dim=-1), reduction='batchmean')
 
-        sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            rationales[:, :, 1], masks, args.sparsity_percentage)
-
-        sparsity = (torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item()
+        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
+            drug_rationales[:, :, 1], masks[0], args.sparsity_percentage)
+        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
+            prot_ratioanles[:, :, 1], masks[1], args.sparsity_percentage)
+        sparsity_loss = drug_sparsity_loss + prot_sparsity_loss
+        
         train_sp.append(
-            (torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item())
+            (torch.sum(drug_rationales[:, :, 1]) / torch.sum(masks[0])).cpu().item() + 
+            (torch.sum(prot_ratioanles[:, :, 1]) / torch.sum(masks[1])).cpu().item())
 
-        continuity_loss = args.continuity_lambda * get_continuity_loss(
-            rationales[:, :, 1])
+        drug_continuity_loss = args.continuity_lambda * get_continuity_loss(
+            drug_rationales[:, :, 1])
+        prot_continuity_loss = args.continuity_lambda * get_continuity_loss(
+            prot_ratioanles[:, :, 1])
+        continuity_loss = drug_continuity_loss + prot_continuity_loss
         
         gen_loss = sparsity_loss + continuity_loss + jsd_loss
-        gen_loss.backward()
         gen_losses.append(gen_loss.cpu().detach().numpy())
+        gen_loss.backward()
+        
         opt_gen.step()
         opt_gen.zero_grad()
+
         n1=0
         n2=0
         n3=0
-        for idx,p in model.cls.named_parameters():
+        n4=0
+        #############recover the parameters#############
+        for idx,p in model.drug_encoder.named_parameters():
             if idx in name1:
                 p.requires_grad=True
                 n1+=1
-        for idx,p in model.cls_fc.named_parameters():
+        for idx,p in model.prot_encoder.named_parameters():
             if idx in name2:
-                p.requires_grad = True
-                n2 += 1
-        if args.model_type != 'sp':
-            for idx,p in model.layernorm2.named_parameters():
-                if idx in name3:
-                    p.requires_grad = True
-                    n3 += 1
-        # print('recover name1={},name2={},name3={}'.format(n1, n2, n3))
-
+                p.requires_grad=True
+                n2+=1
+        for idx,p in model.cls_fc.named_parameters():
+            if idx in name3:
+                p.requires_grad=True
+                n3+=1
+        if args.bi_attention:
+            for idx,p in model.bi_attention.named_parameters():
+                if idx in name4:
+                    p.requires_grad=True
+                    n4+=1
+        print('recover name1={},name2={},name3={},name4={}'.format(n1, n2, n3, n4))
+        
 
         cls_soft_logits = torch.softmax(forward_logit, dim=-1)
         _, pred = torch.max(cls_soft_logits, dim=-1)
