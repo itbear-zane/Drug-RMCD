@@ -28,7 +28,7 @@ def parse():
                         help='model weight path')
     parser.add_argument('--seed',
                         type=int,
-                        default=12252018,
+                        default=42,
                         help='random seed')
     parser.add_argument('--batch_size',
                         type=int,
@@ -44,48 +44,47 @@ def parse():
                         help='save_interval [default: 10]')
 
     # model parameters
-    parser.add_argument('--if_biattn',
-                        action='store_true',
-                        help='if use biattention in embedding')
     parser.add_argument('--div',
                         type=str,
                         default='kl',
                         help='kl loss')
-    parser.add_argument('--cell_type',
-                        type=str,
-                        default="GRU",
-                        help='Cell type: LSTM, GRU, TransformerDecoder [default: GRU]')
-    parser.add_argument('--num_layers',
-                        type=int,
-                        default=1,
-                        help='RNN cell layers')
     parser.add_argument('--dropout',
                         type=float,
                         default=0.2,
                         help='Network Dropout')
+    parser.add_argument('--num_layers',
+                        type=int,
+                        default=3,
+                        help='Transformer layers')
     parser.add_argument('--embedding_dim',
                         type=int,
-                        default=100,
+                        default=128,
+                        help='Embedding dims [default: 100]')
+    parser.add_argument('--dim_feedforward',
+                        type=int,
+                        default=1028,
                         help='Embedding dims [default: 100]')
     parser.add_argument('--num_heads',
                         type=int,
-                        default=100,
-                        help='Num heads of transformer layer [default: 100]')
-    parser.add_argument('--hidden_dim',
+                        default=4,
+                        help='Num attention heads of transformer layer')
+    parser.add_argument('--ban_heads',
                         type=int,
-                        default=200,
+                        default=2,
+                        help='Num attention heads of BAN layer')
+    parser.add_argument('--mlp_in_dim',
+                        type=int,
+                        default=256,
                         help='RNN hidden dims [default: 100]')
+    parser.add_argument('--mlp_hidden_dim',
+                        type=int,
+                        default=512,)
+    parser.add_argument('--mlp_out_dim',
+                        type=int,
+                        default=128,)
     parser.add_argument('--num_class',
                         type=int,
                         default=2,
-                        help='Number of predicted classes [default: 2]')
-    parser.add_argument('--lay',
-                        type=bool,
-                        default=True,
-                        help='Number of predicted classes [default: 2]')
-    parser.add_argument('--model_type',
-                        type=str,
-                        default='sp',
                         help='Number of predicted classes [default: 2]')
 
     # learning parameters
@@ -123,10 +122,6 @@ def parse():
                         type=str,
                         default='0',
                         help='id(s) for CUDA_VISIBLE_DEVICES [default: None]')
-    parser.add_argument('--share',
-                        type=int,
-                        default=0,
-                        help='')
     parser.add_argument(
         '--writer',
         type=str,
