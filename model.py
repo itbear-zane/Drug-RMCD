@@ -4,102 +4,6 @@ import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
 
-class TransformerDecoderModel(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, nhead=8, dim_feedforward=2048, dropout=0.1, \
-        activation='relu', max_len=5000, num_directions=2):
-        super(TransformerDecoderModel, self).__init__()
-        
-        # 参数初始化
-        self.input_size = input_size  # 输入特征维度
-        self.hidden_size = hidden_size // num_directions  # 单向隐藏层大小
-        self.num_layers = num_layers
-        self.num_directions = num_directions  # 双向
-        
-        # Transformer 参数
-        self.d_model = hidden_size  # Transformer 的隐藏层大小
-        self.nhead = nhead  # 多头注意力头数
-        self.num_decoder_layers = num_layers  # 解码器层数
-        self.dim_feedforward = dim_feedforward  # 前馈网络维度
-        
-        # 输入线性变换层（将 input_size 映射到 d_model）
-        self.input_projection = nn.Linear(self.input_size, self.d_model)
-        
-        # Transformer 解码器
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=self.d_model,
-            nhead=self.nhead,
-            dim_feedforward=self.dim_feedforward,
-            dropout=dropout,
-            activation=activation,
-            batch_first=False  # 注意：PyTorch 默认 batch_first=False
-        )
-        self.transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=self.num_decoder_layers)
-        
-        # 输出线性变换层（将 d_model 映射到 hidden_size * num_directions）
-        self.output_projection = nn.Linear(self.d_model, self.hidden_size * self.num_directions)
-        
-        # 位置编码
-        self.positional_encoding = PositionalEncoding(self.d_model, dropout, max_len)
-
-    def forward(self, src):
-        """
-        src: (batch_size, sequence_length, input_size)
-        """
-        batch_size, sequence_length, _ = src.size()
-        
-        # 1. 输入线性变换
-        src = self.input_projection(src)  # (batch_size, sequence_length, d_model)
-        
-        # 2. 调整维度以适应 Transformer 输入
-        src = src.permute(1, 0, 2)  # (sequence_length, batch_size, d_model)
-        
-        # 3. 添加位置编码
-        src = self.positional_encoding(src)  # (sequence_length, batch_size, d_model)
-        
-        # 4. 创建因果掩码
-        tgt_mask = self.generate_square_subsequent_mask(sequence_length).to(src.device)
-        
-        # 5. Transformer 解码器
-        memory = src  # 使用输入序列作为记忆张量
-        output = self.transformer_decoder(tgt=src, memory=memory, tgt_mask=tgt_mask)  # (sequence_length, batch_size, d_model)
-        
-        # 6. 调整维度回原始顺序
-        output = output.permute(1, 0, 2)  # (batch_size, sequence_length, d_model)
-        
-        # 7. 输出线性变换
-        output = self.output_projection(output)  # (batch_size, sequence_length, hidden_size * num_directions)
-        
-        # 8. 获取最后一个时间步的隐藏状态 h_n
-        h_n = output[:, -1, :]  # (batch_size, hidden_size * num_directions)
-        h_n = h_n.unsqueeze(0).repeat(self.num_layers * self.num_directions, 1, 1)  # (num_layers * num_directions, batch_size, hidden_size)
-        
-        return output, h_n
-
-    @staticmethod
-    def generate_square_subsequent_mask(sz):
-        """生成因果掩码"""
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
-
-# 位置编码模块
-class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
-        super(PositionalEncoding, self).__init__()
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(1)  # (max_len, 1, d_model)
-        
-        self.dropout = nn.Dropout(dropout)
-        self.register_buffer('pe', pe)
-
-    def forward(self, x):
-        x = x + self.pe[:x.size(0), :]
-        x = self.dropout(x)
-        return x
 
 def drop_path(x, drop_prob: float = 0., training: bool = False, scale_by_keep: bool = True):
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
@@ -386,6 +290,7 @@ def get_activation_fn(activation):
     else:
         raise RuntimeError("--activation-fn {} not supported".format(activation))
 
+
 class SelectItem(nn.Module):
     def __init__(self, item_index):
         super(SelectItem, self).__init__()
@@ -395,105 +300,7 @@ class SelectItem(nn.Module):
     def forward(self, inputs):
         return inputs[self.item_index]
 
-class Embedding(nn.Module):
-
-    def __init__(self, vocab_size, embedding_dim, pretrained_embedding=None):
-        super(Embedding, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        if pretrained_embedding is not None:
-            self.embedding.weight.data = torch.from_numpy(pretrained_embedding)
-        self.embedding.weight.requires_grad = False
-
-    def forward(self, x):
-        """
-        Inputs:
-        x -- (batch_size, seq_length)
-        Outputs
-        shape -- (batch_size, seq_length, embedding_dim)
-        """
-        return self.embedding(x)
-
-
-class DrugEmbedding(nn.Module):
-    def __init__(
-        self,
-        if_biattn = True,
-        drug_pretrained_dim = 768, 
-        prot_pretrained_dim = 1024, 
-        embed_dim = 512, 
-        num_heads = 8, 
-    ):
-        super().__init__()
-        """Constructor for the model."""
-        
-        self.drug_project = Projector(
-            input_dim = drug_pretrained_dim,
-            out_dim = embed_dim,
-            activation_fn = 'relu'
-        )
-
-        self.prot_project = Projector(
-            input_dim = prot_pretrained_dim,
-            out_dim = embed_dim,
-            activation_fn = 'relu'
-        )
-
-        self.if_biattn = if_biattn
-        if if_biattn:
-            self.bi_attention = BiAttentionBlock(
-                v_dim=512,
-                l_dim=512,
-                embed_dim=embed_dim,
-                num_heads=num_heads,
-            )
     
-    def forward(self, inputs, masks):
-        drug_embed, prot_embed, drug_mask, prot_mask = inputs[0], inputs[1], masks[0], masks[1]
-        
-        drug_embed = self.drug_project(drug_embed)
-        prot_embed = self.prot_project(prot_embed)
-
-        if self.if_biattn:
-            drug_embed, prot_embed = self.bi_attention(drug_embed, prot_embed, ~drug_mask.bool(), ~prot_mask.bool())
-        
-        # print(torch.any(torch.isnan(drug_embed)).item(), torch.any(torch.isnan(prot_embed)).item())
-        # print("-" * 20)
-
-        embedding = torch.cat([drug_embed, prot_embed], dim=1)
-        mask = torch.cat([drug_mask, prot_mask], dim=1)
-
-        return embedding, mask
-
-class Rnn(nn.Module):
-
-    def __init__(self, cell_type, embedding_dim, hidden_dim, num_layers):
-        super(Rnn, self).__init__()
-        if cell_type == 'LSTM':
-            self.rnn = nn.LSTM(input_size=embedding_dim,
-                               hidden_size=hidden_dim // 2,
-                               num_layers=num_layers,
-                               batch_first=True,
-                               bidirectional=True)
-        elif cell_type == 'GRU':
-            self.rnn = nn.GRU(input_size=embedding_dim,
-                              hidden_size=hidden_dim // 2,
-                              num_layers=num_layers,
-                              batch_first=True,
-                              bidirectional=True)
-        else:
-            raise NotImplementedError('cell_type {} is not implemented'.format(cell_type))
-
-    def forward(self, x):
-        """
-        Inputs:
-        x - - (batch_size, seq_length, input_dim)
-        Outputs:
-        h - - bidirectional(batch_size, seq_length, hidden_dim)
-        """
-        h = self.rnn(x)
-        return h
-    
-
 # class Classifier(nn.Module):
 #     def __init__(self, in_dim, hidden_dim, out_dim, binary=1):
 #         super(Classifier, self).__init__()
@@ -517,39 +324,81 @@ class Sp_norm_model(nn.Module):
     def __init__(self, args):
         super(Sp_norm_model, self).__init__()
         self.args = args
-        # self.embedding_layer = Embedding(args.vocab_size,
-        #                                  args.embedding_dim,
-        #                                  args.pretrained_embedding)
-        self.embedding_layer = DrugEmbedding(if_biattn=args.if_biattn, embed_dim=args.embedding_dim)
+        self.drug_embedding_layer = Projector(input_dim=756,
+                                            out_dim=args.embedding_dim, 
+                                            activation_fn='relu')
+        self.prot_embedding_layer = Projector(input_dim=1024, 
+                                            out_dim=args.embedding_dim,
+                                            activation_fn='relu')
+        
+
+        self.drug_generator = self._init_generator(args)
+        self.prot_generator = self._init_generator(args)
+
+        self.drug_encoder = self._init_encoder(args)
+        self.prot_encoder = self._init_encoder(args)
+
+        if args.bi_attention:
+            self.bi_attention = BiAttentionBlock(v_dim=args.hidden_dim,
+                                                l_dim=args.hidden_dim,
+                                                embed_dim=args.hidden_dim,
+                                                num_heads=args.num_heads,
+                                                dropout=args.dropout)
+
+
+        self.cls_fc = nn.Linear(args.hidden_dim * 2, args.num_class)
+        
+    def _init_generator(self, args):
+        """
+        Initialize the generator.
+        """
         if args.cell_type == 'GRU':
-            self.gen = nn.GRU(input_size=args.embedding_dim,
-                                    hidden_size=args.hidden_dim // 2,
-                                    num_layers=args.num_layers,
-                                    batch_first=True,
-                                    bidirectional=True)
-            self.cls = nn.GRU(input_size=args.embedding_dim,
-                            hidden_size=args.hidden_dim // 2,
-                            num_layers=args.num_layers,
-                            batch_first=True,
-                            bidirectional=True)
-        elif args.cell_type == 'TransformerDecoder':
-            self.gen = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
-            self.cls = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
-
-
-        self.cls_fc = nn.Linear(args.hidden_dim, args.num_class)
-
-        self.z_dim = 2
-        self.gen_fc = nn.Linear(args.hidden_dim, self.z_dim)
-        self.dropout = nn.Dropout(args.dropout)
-        self.layernorm1 = nn.LayerNorm(args.hidden_dim)
-        self.generator=nn.Sequential(self.gen,
-                                     SelectItem(0),
-                                     self.layernorm1,
-                                     self.dropout,
-                                     self.gen_fc)
-
-
+            gen = nn.GRU(input_size=args.embedding_dim,
+                    hidden_size=args.hidden_dim // 2,
+                    num_layers=args.num_layers,
+                    batch_first=True,
+                    bidirectional=True)
+        elif args.cell_type == 'TransformerEncoder':
+            gen = nn.TransformerEncoder(
+                encoder_layer=nn.TransformerEncoderLayer(d_model=args.embedding_dim,
+                                        nhead=args.num_heads, 
+                                        dim_feedforward=args.hidden_dim,
+                                        dropout=args.dropout, 
+                                        batch_first=True),
+                num_layers=args.num_layers
+            )
+            #(args.embedding_dim, args.hidden_dim, args.num_layers)
+        gen_fc = nn.Linear(args.hidden_dim, 2)
+        dropout = nn.Dropout(args.dropout)
+        layernorm = nn.LayerNorm(args.hidden_dim)
+        generator = nn.Sequential(gen,
+                                SelectItem(0),
+                                layernorm,
+                                dropout,
+                                gen_fc)
+        return generator
+    
+    def _init_encoder(self, args):
+        """
+        Initialize the encoder.
+        """
+        if args.cell_type == 'GRU':
+            encoder = nn.GRU(input_size=args.embedding_dim,
+                    hidden_size=args.hidden_dim // 2,
+                    num_layers=args.num_layers,
+                    batch_first=True,
+                    bidirectional=True)
+        elif args.cell_type == 'TransformerEncoder':
+            encoder = nn.TransformerEncoder(
+                encoder_layer=nn.TransformerEncoderLayer(d_model=args.embedding_dim,
+                                        nhead=args.num_heads, 
+                                        dim_feedforward=args.hidden_dim,
+                                        dropout=args.dropout, 
+                                        batch_first=True),
+                num_layers=args.num_layers
+            )
+        return encoder
+        
     def _independent_soft_sampling(self, rationale_logits):
         """
         Use the hidden states at all time to sample whether each word is a rationale or not.
@@ -569,71 +418,91 @@ class Sp_norm_model(nn.Module):
         """
         z = F.gumbel_softmax(rationale_logits, tau=1, hard=True)
         return z
+    
+    def _get_combine_output(self, drug_enc_output, prot_enc_output):
+        drug_enc_output = torch.transpose(drug_enc_output, 1, 2)
+        prot_enc_output = torch.transpose(prot_enc_output, 1, 2)
+        drug_cls_output, _ = torch.max(drug_enc_output, axis=2)
+        prot_cls_output, _ = torch.max(prot_enc_output, axis=2)
+        cls_outputs = torch.cat([drug_cls_output, prot_cls_output], dim=1)
+        return cls_outputs
 
-    def forward(self, inputs, masks):
-        embedding, masks = self.embedding_layer(inputs, masks)
-        masks_ = masks.unsqueeze(-1)
+    def forward(self, inputs, masks, bi_attention=True):
+        drug_embedding = self.drug_embedding_layer(inputs[0])
+        prot_embedding = self.prot_embedding_layer(inputs[1])
+
+        drug_masks = masks[0]
+        prot_masks = masks[1]
 
         ########## Genetator ##########
-        embedding = masks_ * embedding# (batch_size, seq_length, embedding_dim)
-        gen_logits=self.generator(embedding)
+        drug_gen_logits=self.drug_generator(drug_embedding, drug_masks) # (batch_size, seq_length, 2)
+        prot_gen_logits=self.prot_generator(prot_embedding, prot_masks) # (batch_size, seq_length, 2)
         ########## Sample ##########
-        z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
+        drug_z = self.independent_straight_through_sampling(drug_gen_logits)  # (batch_size, seq_length, 2)
+        prot_z = self.independent_straight_through_sampling(prot_gen_logits)  # (batch_size, seq_length, 2)
         ########## Classifier ##########
-        cls_embedding = embedding * (z[:, :, 1].unsqueeze(-1))  # (batch_size, seq_length, embedding_dim)
-        cls_outputs, _ = self.cls(cls_embedding)  # (batch_size, seq_length, hidden_dim)
-        cls_outputs = cls_outputs * masks_ + (1. -
-                                              masks_) * (-1e6)
+        drug_enc_output = self.drug_encoder(drug_embedding, drug_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, prot_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
+
+        if bi_attention:
+            drug_enc_output, prot_enc_output = self.bi_attention(drug_enc_output,
+                                                                prot_enc_output,
+                                                                ~drug_z[:, :, 1].bool(), 
+                                                                ~prot_z[:, :, 1].bool())
+
         # (batch_size, hidden_dim, seq_length)
-        cls_outputs = torch.transpose(cls_outputs, 1, 2)
-        cls_outputs, _ = torch.max(cls_outputs, axis=2)
+        cls_outputs = self._get_combine_output(drug_enc_output, prot_enc_output)
         # shape -- (batch_size, num_classes)
         cls_logits = self.cls_fc(self.dropout(cls_outputs))
-        return z, cls_logits
-
+        return drug_z, prot_z, cls_logits
 
     def train_one_step(self, inputs, masks):    #input x directly to predictor
-        embedding, masks = self.embedding_layer(inputs, masks)
-        masks_ = masks.unsqueeze(-1)
-        # (batch_size, seq_length, embedding_dim)
-        embedding = masks_ * embedding
-        outputs, _ = self.cls(embedding)  # (batch_size, seq_length, hidden_dim)
-        outputs = outputs * masks_ + (1. -
-                                      masks_) * (-1e6)
-        # (batch_size, hidden_dim, seq_length)
-        outputs = torch.transpose(outputs, 1, 2)
-        outputs, _ = torch.max(outputs, axis=2)
+        drug_embedding = self.drug_embedding_layer(inputs[0])
+        prot_embedding = self.prot_embedding_layer(inputs[1])
+
+        drug_masks= masks[0]
+        prot_masks = masks[1]
+
+        drug_enc_output = self.drug_encoder(drug_embedding, drug_masks)  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, prot_masks)  # (batch_size, seq_length, hidden_dim)
+
+        if self.args.bi_attention:
+            drug_enc_output, prot_enc_output = self.bi_attention(drug_enc_output,
+                                                        prot_enc_output,
+                                                        ~drug_masks.bool(), 
+                                                        ~prot_masks.bool())
+        # (batch_size, hidden_dim, seq_length)  
+        cls_outputs = self._get_combine_output(drug_enc_output, prot_enc_output)
         # shape -- (batch_size, num_classes)
-        logits = self.cls_fc(self.dropout(outputs))
-        return logits
+        cls_logits = self.cls_fc(self.dropout(cls_outputs))
+        return cls_logits
 
 
-    def get_rationale(self, inputs, masks):
-        embedding, masks = self.embedding_layer(inputs, masks)
-        masks_ = masks.unsqueeze(-1)
-
+    def get_rationale(self, inputs, masks, type=None):
         ########## Genetator ##########
-        embedding = masks_ * embedding  # (batch_size, seq_length, embedding_dim)
-        gen_logits = self.generator(embedding) # (batch_size, seq_length, 2)
+        if type == 'drug':
+            embedding = self.drug_embedding_layer(inputs[0])  # (batch_size, seq_length, embedding_dim)
+            masks = masks[0]
+            gen_logits = self.drug_generator(embedding, masks) # (batch_size, seq_length, 2)    
+        elif type == 'prot':
+            embedding = self.prot_embedding_layer(inputs[1])  # (batch_size, seq_length, embedding_dim)
+            masks = masks[1]
+            gen_logits = self.prot_generator(embedding, masks)  # (batch_size, seq_length, 2)
+        else:
+            raise NotImplementedError('type {} is not implemented'.format(type))
         ########## Sample ##########
         z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
+
         return z, masks
     
-    def pred_forward_logit(self, inputs, masks,z):
-        embedding, masks = self.embedding_layer(inputs, masks)
-        masks_ = masks.unsqueeze(-1)
-
-        ########## Genetator ##########
-        embedding = masks_ * embedding # (batch_size, seq_length, embedding_dim)
+    def pred_forward_logit(self, inputs, drug_z, prot_z):
+        drug_embedding = self.drug_embedding_layer(inputs[0]) # (batch_size, seq_length, embedding_dim)
+        prot_embedding = self.prot_embedding_layer(inputs[1]) # (batch_size, seq_length, embedding_dim)
 
         ########## Classifier ##########
-        cls_embedding = embedding * (z[:, :, 1].unsqueeze(-1))  # (batch_size, seq_length, embedding_dim)
-        cls_outputs, _ = self.cls(cls_embedding)  # (batch_size, seq_length, hidden_dim)
-        cls_outputs = cls_outputs * masks_ + (1. -
-                                              masks_) * (-1e6)
-        # (batch_size, hidden_dim, seq_length)
-        cls_outputs = torch.transpose(cls_outputs, 1, 2)
-        cls_outputs, _ = torch.max(cls_outputs, axis=2)
+        drug_enc_output = self.drug_encoder(drug_embedding, drug_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, prot_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
+        cls_outputs = self._get_combine_output(drug_enc_output, prot_enc_output)
         # shape -- (batch_size, num_classes)
         cls_logits = self.cls_fc(self.dropout(cls_outputs))
         return cls_logits
@@ -650,88 +519,6 @@ class Sp_norm_model(nn.Module):
         gen_logits = self.gen_fc(self.dropout(gen_output))  # (batch_size, seq_length, 2)
         soft_log=self._independent_soft_sampling(gen_logits)
         return soft_log
-
-
-
-class GenEncShareModel(nn.Module):
-
-    def __init__(self, args):
-        super(GenEncShareModel, self).__init__()
-        self.args = args
-        self.embedding_layer = Embedding(args.vocab_size,
-                                         args.embedding_dim,
-                                         args.pretrained_embedding)
-        self.enc = Rnn(args.cell_type,
-                       args.embedding_dim,
-                       args.hidden_dim,
-                       args.num_layers)
-        self.z_dim = 2
-        self.gen_fc = nn.Linear(args.hidden_dim, self.z_dim)
-        self.cls_fc = nn.Linear(args.hidden_dim, args.num_class)
-        self.dropout = nn.Dropout(args.dropout)
-        self.layernorm = nn.LayerNorm(args.hidden_dim)
-
-    def _independent_soft_sampling(self, rationale_logits):
-        """
-        Use the hidden states at all time to sample whether each word is a rationale or not.
-        No dependency between actions. Return the sampled (soft) rationale mask.
-        Outputs:
-                z -- (batch_size, sequence_length, 2)
-        """
-        z = torch.softmax(rationale_logits, dim=-1)
-
-        return z
-
-    def independent_straight_through_sampling(self, rationale_logits):
-        """
-        Straight through sampling.
-        Outputs:
-            z -- shape (batch_size, sequence_length, 2)
-        """
-        z = self._independent_soft_sampling(rationale_logits)
-        z = F.gumbel_softmax(rationale_logits, tau=1, hard=True)
-        return z
-
-    # inputs (batch_size, seq_length)
-    # masks (batch_size, seq_length)
-    def forward(self, inputs, masks):
-        #  masks_ (batch_size, seq_length, 1)
-        masks_ = masks.unsqueeze(-1)
-        ########## Genetator ##########
-        embedding = masks_ * self.embedding_layer(inputs)  # (batch_size, seq_length, embedding_dim)
-        gen_output, _ = self.enc(embedding)  # (batch_size, seq_length, hidden_dim)
-        gen_output = self.layernorm(gen_output)
-        gen_logits = self.gen_fc(self.dropout(gen_output))  # (batch_size, seq_length, 2)
-        ########## Sample ##########
-        z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
-        ########## Classifier ##########
-        cls_embedding = embedding * (z[:, :, 1].unsqueeze(-1))  # (batch_size, seq_length, embedding_dim)
-        cls_outputs, _ = self.enc(cls_embedding)  # (batch_size, seq_length, hidden_dim)
-        cls_outputs = self.layernorm(cls_outputs)
-        cls_outputs = cls_outputs * masks_ + (1. -
-                                              masks_) * (-1e6)
-        # (batch_size, hidden_dim, seq_length)
-        cls_outputs = torch.transpose(cls_outputs, 1, 2)
-        cls_outputs, _ = torch.max(cls_outputs, axis=2)
-        # shape -- (batch_size, num_classes)
-        cls_logits = self.cls_fc(self.dropout(cls_outputs))
-
-        # LSTM
-        return z, cls_logits
-
-    def train_one_step(self, inputs, masks):
-        masks_ = masks.unsqueeze(-1)
-        # (batch_size, seq_length, embedding_dim)
-        embedding = masks_ * self.embedding_layer(inputs)
-        outputs, _ = self.enc(embedding)  # (batch_size, seq_length, hidden_dim)
-        outputs = outputs * masks_ + (1. -
-                                      masks_) * (-1e6)
-        # (batch_size, hidden_dim, seq_length)
-        outputs = torch.transpose(outputs, 1, 2)
-        outputs, _ = torch.max(outputs, axis=2)
-        # shape -- (batch_size, num_classes)
-        logits = self.cls_fc(self.dropout(outputs))
-        return logits
 
 
 
