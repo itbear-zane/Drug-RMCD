@@ -207,7 +207,7 @@ for p in model.prot_encoder.parameters():
 for p in model.cls_fc.parameters():
     if p.requires_grad==True:
         p_para.append(p)
-if args.bi_attention:
+if args.if_biattn:
     for p in model.bi_attention.parameters():
         if p.requires_grad==True:
             p_para.append(p)

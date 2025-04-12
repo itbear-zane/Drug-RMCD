@@ -88,7 +88,7 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
             if p.requires_grad == True:
                 name3.append(idx)
                 p.requires_grad = False
-        if args.bi_attention:
+        if args.if_biattn:
             for idx,p in model.bi_attention.named_parameters():
                 if p.requires_grad == True:
                     name4.append(idx)
@@ -148,7 +148,7 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
             if idx in name3:
                 p.requires_grad=True
                 n3+=1
-        if args.bi_attention:
+        if args.if_biattn:
             for idx,p in model.bi_attention.named_parameters():
                 if idx in name4:
                     p.requires_grad=True

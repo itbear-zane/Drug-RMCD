@@ -338,7 +338,7 @@ class Sp_norm_model(nn.Module):
         self.drug_encoder = self._init_encoder(args)
         self.prot_encoder = self._init_encoder(args)
 
-        if args.bi_attention:
+        if args.if_biattn:
             self.bi_attention = BiAttentionBlock(v_dim=args.hidden_dim,
                                                 l_dim=args.hidden_dim,
                                                 embed_dim=args.hidden_dim,
@@ -466,7 +466,7 @@ class Sp_norm_model(nn.Module):
         drug_enc_output = self.drug_encoder(drug_embedding, drug_masks)  # (batch_size, seq_length, hidden_dim)
         prot_enc_output = self.prot_encoder(prot_embedding, prot_masks)  # (batch_size, seq_length, hidden_dim)
 
-        if self.args.bi_attention:
+        if self.args.if_biattn:
             drug_enc_output, prot_enc_output = self.bi_attention(drug_enc_output,
                                                         prot_enc_output,
                                                         ~drug_masks.bool(), 
