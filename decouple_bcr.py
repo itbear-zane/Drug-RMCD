@@ -190,16 +190,27 @@ if args.test:
 # g_para=list(map(id, model.generator.parameters()))
 # p_para=filter(lambda p: id(p) not in g_para and p.requires_grad==True, model.parameters())
 g_para=[]
-for p in model.generator.parameters():
+for p in model.drug_generator.parameters():
     if p.requires_grad==True:
         g_para.append(p)
+for p in model.prot_generator.parameters():
+    if p.requires_grad==True:
+        g_para.append(p)
+
 p_para=[]
-for p in model.cls.parameters():
+for p in model.drug_encoder.parameters():
+    if p.requires_grad==True:
+        p_para.append(p)
+for p in model.prot_encoder.parameters():
     if p.requires_grad==True:
         p_para.append(p)
 for p in model.cls_fc.parameters():
     if p.requires_grad==True:
         p_para.append(p)
+if args.bi_attention:
+    for p in model.bi_attention.parameters():
+        if p.requires_grad==True:
+            p_para.append(p)
 
 lr2=args.lr
 lr1=args.lr
@@ -237,7 +248,7 @@ for epoch in range(start_epoch, args.epochs):
 
     start = time.time()
     model.train()
-    precision, recall, f1_score, accuracy = train_decouple_causal2(model,optimizer_gen,optimizer_pred, train_loader, device, args,(writer,epoch))
+    precision, recall, f1_score, accuracy = train_decouple_causal2(model,optimizer_gen,optimizer_pred, train_loader, device, args, (writer,epoch))
 
     end = time.time()
     print('\nTrain time for epoch #%d : %f second' % (epoch, end - start))
