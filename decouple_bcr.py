@@ -190,6 +190,9 @@ if args.test:
 # g_para=list(map(id, model.generator.parameters()))
 # p_para=filter(lambda p: id(p) not in g_para and p.requires_grad==True, model.parameters())
 g_para=[]
+for p in model.embedding_layer.parameters():
+    if p.requires_grad==True:
+        g_para.append(p)
 for p in model.generator.parameters():
     if p.requires_grad==True:
         g_para.append(p)
