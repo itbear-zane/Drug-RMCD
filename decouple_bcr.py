@@ -67,6 +67,10 @@ def parse():
                         type=int,
                         default=100,
                         help='Embedding dims [default: 100]')
+    parser.add_argument('--num_heads',
+                        type=int,
+                        default=100,
+                        help='Num heads of transformer layer [default: 100]')
     parser.add_argument('--hidden_dim',
                         type=int,
                         default=200,
@@ -190,6 +194,12 @@ if args.test:
 # g_para=list(map(id, model.generator.parameters()))
 # p_para=filter(lambda p: id(p) not in g_para and p.requires_grad==True, model.parameters())
 g_para=[]
+for p in model.drug_embedding_layer.parameters():
+    if p.requires_grad==True:
+        g_para.append(p)
+for p in model.prot_embedding_layer.parameters():
+    if p.requires_grad==True:
+        g_para.append(p)
 for p in model.drug_generator.parameters():
     if p.requires_grad==True:
         g_para.append(p)
@@ -215,7 +225,7 @@ if args.if_biattn:
 lr2=args.lr
 lr1=args.lr
 
-g_para=filter(lambda p: p.requires_grad==True, model.generator.parameters())
+# g_para=filter(lambda p: p.requires_grad==True, model.generator.parameters())
 para_gen=[{'params': g_para, 'lr':lr1}]
 para_pred=[{'params': p_para,'lr':lr2}]
 

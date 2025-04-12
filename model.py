@@ -319,12 +319,27 @@ class SelectItem(nn.Module):
 #         x = self.fc4(x)
 #         return x
 
+class Generator(nn.Module):
+    def __init__(self, gen, layernorm, dropout, gen_fc):
+        super().__init__()
+        self.gen = gen
+        self.layernorm = layernorm
+        self.dropout = dropout
+        self.gen_fc = gen_fc
+    
+    def forward(self, x, mask):
+        gen_output = self.gen(x, src_key_padding_mask=~mask.bool())
+        layer_output = self.layernorm(gen_output)
+        drop_output = self.dropout(layer_output)
+        res = self.gen_fc(drop_output)
+        return res
+
 
 class Sp_norm_model(nn.Module):
     def __init__(self, args):
         super(Sp_norm_model, self).__init__()
         self.args = args
-        self.drug_embedding_layer = Projector(input_dim=756,
+        self.drug_embedding_layer = Projector(input_dim=768,
                                             out_dim=args.embedding_dim, 
                                             activation_fn='relu')
         self.prot_embedding_layer = Projector(input_dim=1024, 
@@ -345,7 +360,7 @@ class Sp_norm_model(nn.Module):
                                                 num_heads=args.num_heads,
                                                 dropout=args.dropout)
 
-
+        self.dropout = nn.Dropout(args.dropout)
         self.cls_fc = nn.Linear(args.hidden_dim * 2, args.num_class)
         
     def _init_generator(self, args):
@@ -368,11 +383,12 @@ class Sp_norm_model(nn.Module):
                 num_layers=args.num_layers
             )
             #(args.embedding_dim, args.hidden_dim, args.num_layers)
+        else:
+            raise ValueError(f"{args.cell_type} is not supported!")
         gen_fc = nn.Linear(args.hidden_dim, 2)
         dropout = nn.Dropout(args.dropout)
         layernorm = nn.LayerNorm(args.hidden_dim)
-        generator = nn.Sequential(gen,
-                                SelectItem(0),
+        generator = Generator(gen,
                                 layernorm,
                                 dropout,
                                 gen_fc)
@@ -463,8 +479,8 @@ class Sp_norm_model(nn.Module):
         drug_masks= masks[0]
         prot_masks = masks[1]
 
-        drug_enc_output = self.drug_encoder(drug_embedding, drug_masks)  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, prot_masks)  # (batch_size, seq_length, hidden_dim)
+        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=~drug_masks.bool())  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=~prot_masks.bool())  # (batch_size, seq_length, hidden_dim)
 
         if self.args.if_biattn:
             drug_enc_output, prot_enc_output = self.bi_attention(drug_enc_output,
@@ -482,26 +498,27 @@ class Sp_norm_model(nn.Module):
         ########## Genetator ##########
         if type == 'drug':
             embedding = self.drug_embedding_layer(inputs[0])  # (batch_size, seq_length, embedding_dim)
-            masks = masks[0]
-            gen_logits = self.drug_generator(embedding, masks) # (batch_size, seq_length, 2)    
+            mask = masks[0] == 1
+            gen_logits = self.drug_generator(embedding, mask) # (batch_size, seq_length, 2)    
         elif type == 'prot':
             embedding = self.prot_embedding_layer(inputs[1])  # (batch_size, seq_length, embedding_dim)
-            masks = masks[1]
-            gen_logits = self.prot_generator(embedding, masks)  # (batch_size, seq_length, 2)
+            mask = masks[1] == 1
+            gen_logits = self.prot_generator(embedding, mask)  # (batch_size, seq_length, 2)
         else:
             raise NotImplementedError('type {} is not implemented'.format(type))
         ########## Sample ##########
         z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
 
-        return z, masks
+        mask = mask.unsqueeze(-1)
+        return z, mask            
     
     def pred_forward_logit(self, inputs, drug_z, prot_z):
         drug_embedding = self.drug_embedding_layer(inputs[0]) # (batch_size, seq_length, embedding_dim)
         prot_embedding = self.prot_embedding_layer(inputs[1]) # (batch_size, seq_length, embedding_dim)
 
         ########## Classifier ##########
-        drug_enc_output = self.drug_encoder(drug_embedding, drug_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, prot_z[:, :, 1])  # (batch_size, seq_length, hidden_dim)
+        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=drug_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=prot_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
         cls_outputs = self._get_combine_output(drug_enc_output, prot_enc_output)
         # shape -- (batch_size, num_classes)
         cls_logits = self.cls_fc(self.dropout(cls_outputs))

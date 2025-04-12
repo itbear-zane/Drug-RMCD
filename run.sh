@@ -40,13 +40,15 @@
 
 python decouple_bcr.py \
     --lr 0.0001 \
-    --batch_size 16 \
+    --batch_size 2 \
     --gpu 0 --sparsity_percentage 0.175 --epochs 150 \
     --embedding_dim 512 \
+    --hidden_dim 512 \
+    --num_heads 8 \
     --num_layers 2 \
     --if_biattn \
-    --cell_type TransformerDecoder \
-    --writer logs/train_use_biattn_num_layers2_transformerdecoder
+    --cell_type TransformerEncoder \
+    --writer logs/train_dual_num_layers2
 
 # 1st no_biattn
 # python decouple_bcr.py \
