@@ -154,5 +154,7 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
     writer_epoch[0].add_scalar('cont_l', cont_l, writer_epoch[1])
     writer_epoch[0].add_scalar('js', js, writer_epoch[1])
     writer_epoch[0].add_scalar('train_sp', np.mean(train_sp), writer_epoch[1])
+    writer_epoch[0].add_scalar('train_class_loss', np.array(class_losses).mean(), writer_epoch[1])
+    writer_epoch[0].add_scalar('train_gen_loss', np.array(gen_losses).mean(), writer_epoch[1])
     return precision, recall, f1_score, accuracy
 
