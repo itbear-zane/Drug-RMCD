@@ -10,6 +10,7 @@ from validate_util import validate_dev_sentence
 from tensorboardX import SummaryWriter
 from dataloader import get_dataloader
 from utils import evaluate
+import copy
 
 def parse():
     parser = argparse.ArgumentParser(
@@ -192,10 +193,10 @@ if args.test:
 #####################
 # g_para=list(map(id, model.generator.parameters()))
 # p_para=filter(lambda p: id(p) not in g_para and p.requires_grad==True, model.parameters())
-g_embedding=[]
+e_para=[]
 for p in model.embedding_layer.parameters():
     if p.requires_grad==True:
-        g_embedding.append(p)
+        e_para.append(p)
 g_para=[]
 for p in model.generator.parameters():
     if p.requires_grad==True:
@@ -215,7 +216,7 @@ lr3=args.lr
 g_para=filter(lambda p: p.requires_grad==True, model.generator.parameters())
 para_gen=[{'params': g_para, 'lr':lr1}]
 para_pred=[{'params': p_para,'lr':lr2}]
-para_embedding=[{'params': g_embedding,'lr':lr3}]
+para_embedding=[{'params': e_para,'lr':lr3}]
 
 optimizer_gen = torch.optim.Adam(para_gen)
 optimizer_pred = torch.optim.Adam(para_pred)
@@ -230,6 +231,7 @@ if args.resume:
         start_epoch = checkpoint['epoch']
         optimizer_gen.load_state_dict(checkpoint['optimizer_gen_state_dict'])
         optimizer_pred.load_state_dict(checkpoint['optimizer_pred_state_dict'])
+        optimizer_embedding.load_state_dict(checkpoint['optimizer_embedding_state_dict'])
     else:
         raise ValueError(f"{args.checkpoint_path} does not exist!")
 
@@ -239,8 +241,9 @@ if args.resume:
 strat_time=time.time()
 best_all = 0
 f1_best_dev = [0]
-best_dev_epoch = [0]
-acc_best_dev = [0]
+best_epoch = 0
+best_auroc = 0
+best_model = None
 grad=[]
 grad_loss=[]
 for epoch in range(start_epoch, args.epochs):
@@ -263,9 +266,10 @@ for epoch in range(start_epoch, args.epochs):
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
 
     writer.add_scalar('dev_acc',accuracy,epoch)
-    if accuracy > acc_best_dev[-1]:
-        acc_best_dev.append(accuracy)
-        best_dev_epoch.append(epoch)
+    if auroc >= best_auroc:
+        best_model = [copy.deepcopy(model), copy.deepcopy(optimizer_gen), copy.deepcopy(optimizer_pred), copy.deepcopy(optimizer_embedding)]
+        best_auroc = auroc
+        best_epoch = epoch
 
     # 检查是否需要保存模型
     if (epoch + 1) % args.save_interval == 0:
@@ -273,14 +277,15 @@ for epoch in range(start_epoch, args.epochs):
         print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
         
-        save_path = os.path.join(args.writer, f'model_epoch_{epoch}.pth')
+        save_path = os.path.join(args.writer, f'model_epoch_{best_epoch}.pth')
         torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_gen_state_dict': optimizer_gen.state_dict(),
-            'optimizer_pred_state_dict': optimizer_pred.state_dict()
+            'epoch': best_epoch,
+            'model_state_dict': best_model[0].state_dict(),
+            'optimizer_gen_state_dict': best_model[1].state_dict(),
+            'optimizer_pred_state_dict': best_model[2].state_dict(),
+            'optimizer_embedding_state_dict': best_model[3].state_dict(),
         }, save_path)
-        print(f"Model saved at epoch {epoch} to {save_path}")
+        print(f"Model saved at best epoch {best_epoch} to {save_path}")
         
         # 获取当前目录中的所有权重文件
         checkpoint_files = sorted(
@@ -292,6 +297,3 @@ for epoch in range(start_epoch, args.epochs):
             oldest_checkpoint = checkpoint_files[0]
             os.remove(oldest_checkpoint)
             print(f"Deleted oldest checkpoint: {oldest_checkpoint}")
-        
-print(acc_best_dev)
-print(best_dev_epoch)
