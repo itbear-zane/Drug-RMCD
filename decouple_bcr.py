@@ -84,7 +84,7 @@ def parse():
                         type=str,
                         default='sp',
                         help='Number of predicted classes [default: 2]')
-    parser.add_argument('--update_embedding_parameters',
+    parser.add_argument('--update_embedding_parameters_at_stage2',
                         action='store_true',
                         help='if update embedding parameters')
 
@@ -261,19 +261,22 @@ for epoch in range(start_epoch, args.epochs):
     writer.add_scalar('train_acc',accuracy,epoch)
     writer.add_scalar('time',time.time()-strat_time,epoch)
     
-    auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, dev_loader, writer, epoch)
+    auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, dev_loader, device, writer, epoch)
     print("val results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
 
     writer.add_scalar('dev_acc',accuracy,epoch)
     if auroc >= best_auroc:
+        print('Test at Best Model of Epoch ' + str(best_epoch) + " AUROC "
+              + str(auroc) + " AUPRC " + str(auprc) + " Sensitivity " + str(sensitivity) + " Specificity " +
+              str(specificity) + " Accuracy " + str(accuracy))
         best_model = [copy.deepcopy(model), copy.deepcopy(optimizer_gen), copy.deepcopy(optimizer_pred), copy.deepcopy(optimizer_embedding)]
         best_auroc = auroc
         best_epoch = epoch
 
     # 检查是否需要保存模型
     if (epoch + 1) % args.save_interval == 0:
-        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, None, None)
+        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, device, None, None)
         print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
         
