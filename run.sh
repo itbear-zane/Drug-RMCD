@@ -51,12 +51,13 @@
 python decouple_bcr.py \
     --lr 0.0001 \
     --batch_size 16 \
-    --gpu 0 --sparsity_percentage 0.175 --epochs 150 \
+    --gpu 0 --sparsity_percentage 0.175 --epochs 300 \
     --embedding_dim 512 \
-    --num_layers 4 \
+    --num_layers 2 \
     --if_biattn \
     --cell_type TransformerEncoder \
-    --writer logs/train_use_biattn_num_layers4_transformerencoder
+    --resume --checkpoint_path logs/train_use_biattn_num_layers2_transformerencoder/model_epoch_149.pth \
+    --writer logs/train_use_biattn_num_layers2_transformerencoder
 
 # 1st no_biattn
 # python decouple_bcr.py \

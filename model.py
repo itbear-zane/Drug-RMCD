@@ -505,8 +505,8 @@ class DrugEmbedding(nn.Module):
         self.if_biattn = if_biattn
         if if_biattn:
             self.bi_attention = BiAttentionBlock(
-                v_dim=512,
-                l_dim=512,
+                v_dim=embed_dim,
+                l_dim=embed_dim,
                 embed_dim=embed_dim,
                 num_heads=num_heads,
             )
