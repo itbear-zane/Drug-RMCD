@@ -18,7 +18,7 @@ class JS_DIV(nn.Module):
         m = (0.5 * (p_s + q_s)).log()
         return 0.5 * (self.kl_div(m, p_s.log()) + self.kl_div(m, q_s.log()))
 
-def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer_epoch):
+def train_decouple_causal2(model, opt_gen,opt_pred, opt_embedding, dataset, device, args,writer_epoch):
     TP = 0
     TN = 0
     FN = 0
@@ -61,6 +61,8 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
         opt_pred.zero_grad()
         opt_gen.step()
         opt_gen.zero_grad()
+        opt_embedding.step()
+        opt_embedding.zero_grad()
 
         # train rationale with sparsity, continuity, js-div
         opt_gen.zero_grad()
@@ -79,6 +81,12 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
             for idx,p in model.layernorm2.named_parameters():
                 if p.requires_grad == True:
                     name3.append(idx)
+                    p.requires_grad = False
+        if args.update_embedding_parameters:
+            name4=[]
+            for idx,p in model.embedding_layer.named_parameters():
+                if p.requires_grad == True:
+                    name4.append(idx)
                     p.requires_grad = False
         # print('name1={},name2={},name3={}'.format(len(name1),len(name2),len(name3)))
 
@@ -124,6 +132,12 @@ def train_decouple_causal2(model, opt_gen,opt_pred, dataset, device, args,writer
                 if idx in name3:
                     p.requires_grad = True
                     n3 += 1
+        if args.update_embedding_parameters:
+            n4=0
+            for idx,p in model.embedding_layer.named_parameters():
+                if idx in name4:
+                    p.requires_grad = True
+                    n4 += 1
         # print('recover name1={},name2={},name3={}'.format(n1, n2, n3))
 
 

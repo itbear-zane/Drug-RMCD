@@ -83,6 +83,9 @@ def parse():
                         type=str,
                         default='sp',
                         help='Number of predicted classes [default: 2]')
+    parser.add_argument('--update_embedding_parameters',
+                        action='store_true',
+                        help='if update embedding parameters')
 
     # learning parameters
     parser.add_argument('--dis_lr',
@@ -189,10 +192,11 @@ if args.test:
 #####################
 # g_para=list(map(id, model.generator.parameters()))
 # p_para=filter(lambda p: id(p) not in g_para and p.requires_grad==True, model.parameters())
-g_para=[]
+g_embedding=[]
 for p in model.embedding_layer.parameters():
     if p.requires_grad==True:
-        g_para.append(p)
+        g_embedding.append(p)
+g_para=[]
 for p in model.generator.parameters():
     if p.requires_grad==True:
         g_para.append(p)
@@ -206,13 +210,16 @@ for p in model.cls_fc.parameters():
 
 lr2=args.lr
 lr1=args.lr
+lr3=args.lr
 
 g_para=filter(lambda p: p.requires_grad==True, model.generator.parameters())
 para_gen=[{'params': g_para, 'lr':lr1}]
 para_pred=[{'params': p_para,'lr':lr2}]
+para_embedding=[{'params': g_embedding,'lr':lr3}]
 
 optimizer_gen = torch.optim.Adam(para_gen)
 optimizer_pred = torch.optim.Adam(para_pred)
+optimizer_embedding = torch.optim.Adam(para_embedding)
 
 start_epoch = 0
 if args.resume:
@@ -240,7 +247,7 @@ for epoch in range(start_epoch, args.epochs):
 
     start = time.time()
     model.train()
-    precision, recall, f1_score, accuracy = train_decouple_causal2(model,optimizer_gen,optimizer_pred, train_loader, device, args,(writer,epoch))
+    precision, recall, f1_score, accuracy = train_decouple_causal2(model,optimizer_gen,optimizer_pred, optimizer_embedding,train_loader, device, args,(writer,epoch))
 
     end = time.time()
     print('\nTrain time for epoch #%d : %f second' % (epoch, end - start))
