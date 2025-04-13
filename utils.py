@@ -2,7 +2,7 @@ import os
 import random
 import numpy as np
 import torch
-from validate_util import validate_dev_sentence
+from validate_util import validate_dev_sentence, validate_dev_sentence2
 from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix
 
 
@@ -81,5 +81,6 @@ def evaluate(model, dev_loader, writer, epoch):
         
         print("Validate Sentence")
         validate_dev_sentence(model, dev_loader, device,(writer,epoch))
+        validate_dev_sentence2(model, dev_loader, device,(writer,epoch))
         
         return auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity
