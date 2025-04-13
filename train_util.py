@@ -82,7 +82,7 @@ def train_decouple_causal2(model, opt_gen,opt_pred, opt_embedding, dataset, devi
                 if p.requires_grad == True:
                     name3.append(idx)
                     p.requires_grad = False
-        if args.update_embedding_parameters:
+        if not args.update_embedding_parameters:
             name4=[]
             for idx,p in model.embedding_layer.named_parameters():
                 if p.requires_grad == True:
@@ -132,7 +132,7 @@ def train_decouple_causal2(model, opt_gen,opt_pred, opt_embedding, dataset, devi
                 if idx in name3:
                     p.requires_grad = True
                     n3 += 1
-        if args.update_embedding_parameters:
+        if not args.update_embedding_parameters:
             n4=0
             for idx,p in model.embedding_layer.named_parameters():
                 if idx in name4:
