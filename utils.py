@@ -35,7 +35,7 @@ def mkdir(path):
         os.makedirs(path)
 
 
-def evaluate(model, dev_loader, device, writer, epoch):
+def evaluate(model, dev_loader, device):
     y_labels = []
     y_preds = []
     with torch.no_grad():
@@ -66,11 +66,11 @@ def evaluate(model, dev_loader, device, writer, epoch):
     y_preds_s = [1 if i else 0 for i in (y_preds >= thred_optim)]
     cm1 = confusion_matrix(y_labels, y_preds_s)
     accuracy = (cm1[0, 0] + cm1[1, 1]) / sum(sum(cm1))
+    precision = cm1[1, 1] / (cm1[1, 1] + cm1[0, 1])
+    recall = cm1[1, 1] / (cm1[1, 1] + cm1[1, 0])
     sensitivity = cm1[0, 0] / (cm1[0, 0] + cm1[0, 1])
     specificity = cm1[1, 1] / (cm1[1, 0] + cm1[1, 1])
     precision1 = precision_score(y_labels, y_preds_s)
     
     f1 = np.max(f1[5:])
-    if writer is not None or epoch is not None:
-        writer.add_scalar('sent_acc', accuracy, epoch)
-    return auroc.item(), auprc.item(), 0, 0, f1.item(), accuracy.item(), sensitivity.item(), specificity.item()
+    return auroc.item(), auprc.item(), precision1, recall, f1.item(), accuracy.item(), sensitivity.item(), specificity.item()

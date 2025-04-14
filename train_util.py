@@ -18,7 +18,7 @@ class JS_DIV(nn.Module):
         m = (0.5 * (p_s + q_s)).log()
         return 0.5 * (self.kl_div(m, p_s.log()) + self.kl_div(m, q_s.log()))
 
-def train_decouple_causal2(model, opt_gen,opt_pred, opt_embedding, dataset, device, args,writer_epoch):
+def train_one_epoch(model, opt_gen,opt_pred, opt_embedding, dataset, device, args, wanbd_run, epoch):
     TP = 0
     TN = 0
     FN = 0
@@ -31,7 +31,6 @@ def train_decouple_causal2(model, opt_gen,opt_pred, opt_embedding, dataset, devi
     batch_len=len(dataset)
     class_losses = []
     gen_losses = []
-    _, epoch = writer_epoch
     for (batch, (inputs, masks, labels)) in enumerate(tqdm(dataset, desc=f'Training epoch {epoch}')):
         opt_gen.zero_grad()
         opt_pred.zero_grad()
@@ -156,19 +155,10 @@ def train_decouple_causal2(model, opt_gen,opt_pred, opt_embedding, dataset, devi
         spar_l += sparsity_loss.cpu().item()
         cont_l += continuity_loss.cpu().item()
         js+=jsd_loss.cpu().item()
-        # print(TP, TN, FN, FP)
-        print(f'avg classification_loss: {np.array(class_losses).mean()}')
-        print(f'avg gen_loss: {np.array(gen_losses).mean()}')
+    wanbd_run.log({"train/avg_cls_loss": np.array(class_losses).mean(), "train/avg_gen_loss": np.array(gen_losses).mean(), "epoch": epoch})
     precision = TP / (TP + FP)
     recall = TP / (TP + FN)
     f1_score = 2 * recall * precision / (recall + precision)
     accuracy = (TP + TN) / (TP + TN + FP + FN)
-    writer_epoch[0].add_scalar('cls', cls_l, writer_epoch[1])
-    writer_epoch[0].add_scalar('spar_l', spar_l, writer_epoch[1])
-    writer_epoch[0].add_scalar('cont_l', cont_l, writer_epoch[1])
-    writer_epoch[0].add_scalar('js', js, writer_epoch[1])
-    writer_epoch[0].add_scalar('train_sp', np.mean(train_sp), writer_epoch[1])
-    writer_epoch[0].add_scalar('train_class_loss', np.array(class_losses).mean(), writer_epoch[1])
-    writer_epoch[0].add_scalar('train_gen_loss', np.array(gen_losses).mean(), writer_epoch[1])
     return precision, recall, f1_score, accuracy
 

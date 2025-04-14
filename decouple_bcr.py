@@ -5,12 +5,14 @@ import time
 import torch
 from embedding import get_embeddings,get_glove_embedding
 from model import Sp_norm_model
-from train_util import train_decouple_causal2
+from train_util import train_one_epoch
 from validate_util import validate_dev_sentence
 from tensorboardX import SummaryWriter
 from dataloader import get_dataloader
 from utils import evaluate
 import copy
+import wandb
+os.environ["WANDB_MODE"]="offline"
 
 def parse():
     parser = argparse.ArgumentParser(
@@ -181,7 +183,7 @@ if args.test:
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
         print(f"Model loaded from {args.checkpoint_path}")
-        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, None, None)
+        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, device)
         print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
         raise ValueError("Testing stops... Don't worry!")
@@ -231,13 +233,23 @@ if args.resume:
         start_epoch = checkpoint['epoch']
         optimizer_gen.load_state_dict(checkpoint['optimizer_gen_state_dict'])
         optimizer_pred.load_state_dict(checkpoint['optimizer_pred_state_dict'])
-        optimizer_embedding.load_state_dict(checkpoint['optimizer_embedding_state_dict'])
+        if 'optimizer_embedding_state_dict' in checkpoint.keys():
+            optimizer_embedding.load_state_dict(checkpoint['optimizer_embedding_state_dict'])
     else:
         raise ValueError(f"{args.checkpoint_path} does not exist!")
 
 ######################
 # Training
 ######################
+
+wanbd_run = wandb.init(
+    project="Drug-RMCD",    # Specify your project
+    name="_".join(args.writer.split('/')[1:]),
+    config={                         # Track hyperparameters and metadata
+        "learning_rate": args.lr,
+    },
+)
+
 strat_time=time.time()
 best_all = 0
 f1_best_dev = [0]
@@ -247,10 +259,10 @@ best_model = None
 grad=[]
 grad_loss=[]
 for epoch in range(start_epoch, args.epochs):
-
+    # TODO wandb
     start = time.time()
     model.train()
-    precision, recall, f1_score, accuracy = train_decouple_causal2(model,optimizer_gen,optimizer_pred, optimizer_embedding,train_loader, device, args,(writer,epoch))
+    precision, recall, f1_score, accuracy = train_one_epoch(model, optimizer_gen, optimizer_pred, optimizer_embedding, train_loader, device, args, wanbd_run, epoch)
 
     end = time.time()
     print('\nTrain time for epoch #%d : %f second' % (epoch, end - start))
@@ -258,14 +270,14 @@ for epoch in range(start_epoch, args.epochs):
     print("traning epoch:{} recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f}".format(epoch, recall,
                                                                                                    precision, f1_score,
                                                                                                    accuracy))
-    writer.add_scalar('train_acc',accuracy,epoch)
-    writer.add_scalar('time',time.time()-strat_time,epoch)
-    
-    auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, dev_loader, device, writer, epoch)
+    wanbd_run.log({"train/accuracy": accuracy, "train/precision": precision, "train/recall": recall, "train/f1": f1_score, "epoch": epoch})
+
+    auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, dev_loader, device)
     print("val results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
+    wanbd_run.log({"val/auroc": auroc, "val/auprc": auprc, "val/sensitivity": sensitivity, "val/specificity": specificity, \
+        "val/accuracy": accuracy, "val/precision": precision, "val/recall": recall, "val/f1": f1_score, "epoch": epoch})
 
-    writer.add_scalar('dev_acc',accuracy,epoch)
     if auroc >= best_auroc:
         print('Test at Best Model of Epoch ' + str(best_epoch) + " AUROC "
               + str(auroc) + " AUPRC " + str(auprc) + " Sensitivity " + str(sensitivity) + " Specificity " +
@@ -276,10 +288,12 @@ for epoch in range(start_epoch, args.epochs):
 
     # 检查是否需要保存模型
     if (epoch + 1) % args.save_interval == 0:
-        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, device, None, None)
+        auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, device)
         print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
-        
+        wanbd_run.log({"test/auroc": auroc, "test/auprc": auprc, "test/sensitivity": sensitivity, "test/specificity": specificity, \
+        "test/accuracy": accuracy, "test/precision": precision, "test/recall": recall, "test/f1": f1_score, "epoch": epoch})
+
         save_path = os.path.join(args.writer, f'model_epoch_{best_epoch}.pth')
         torch.save({
             'epoch': best_epoch,

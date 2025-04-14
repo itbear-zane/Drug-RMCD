@@ -3,3 +3,4 @@ logs/
 *.out
 test_demo.py
 __pycache__/
+wandb/
