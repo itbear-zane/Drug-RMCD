@@ -5,7 +5,7 @@ from torch.nn.utils import spectral_norm
 
 class TransformerEncoderModel(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, nhead=8, dim_feedforward=2048, dropout=0.1, \
-        activation='relu', max_len=5000, num_directions=2):
+        activation='relu', max_len=5000, num_directions=2, if_position=True):
         super(TransformerEncoderModel, self).__init__()
         
         # 参数初始化
@@ -13,6 +13,7 @@ class TransformerEncoderModel(nn.Module):
         self.hidden_size = hidden_size // num_directions  # 单向隐藏层大小
         self.num_layers = num_layers
         self.num_directions = num_directions  # 双向
+        self.if_position = if_position  # 是否使用位置编码
         
         # Transformer 参数
         self.d_model = hidden_size  # Transformer 的隐藏层大小
@@ -38,7 +39,8 @@ class TransformerEncoderModel(nn.Module):
         self.output_projection = nn.Linear(self.d_model, self.hidden_size * self.num_directions)
         
         # 位置编码
-        self.positional_encoding = PositionalEncoding(self.d_model, dropout, max_len)
+        if if_position:
+            self.positional_encoding = PositionalEncoding(self.d_model, dropout, max_len)
 
     def forward(self, src):
         """
@@ -51,7 +53,8 @@ class TransformerEncoderModel(nn.Module):
         src = src.permute(1, 0, 2)  # (sequence_length, batch_size, d_model)
         
         # 3. 添加位置编码
-        src = self.positional_encoding(src)  # (sequence_length, batch_size, d_model)
+        if self.if_position:
+            src = self.positional_encoding(src)  # (sequence_length, batch_size, d_model)
         
         # 4. Transformer 编码器
         output = self.transformer_encoder(src)  # (sequence_length, batch_size, d_model)
@@ -600,8 +603,8 @@ class Sp_norm_model(nn.Module):
             self.gen = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
             self.cls = TransformerDecoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
         elif args.cell_type == 'TransformerEncoder':
-            self.gen = TransformerEncoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
-            self.cls = TransformerEncoderModel(args.embedding_dim, args.hidden_dim, args.num_layers)
+            self.gen = TransformerEncoderModel(args.embedding_dim, args.hidden_dim, args.num_layers, if_position=args.if_position)
+            self.cls = TransformerEncoderModel(args.embedding_dim, args.hidden_dim, args.num_layers, if_position=args.if_position)
         else:
             raise ValueError(f"{args.cell_type} is not supported!")
 
