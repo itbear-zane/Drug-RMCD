@@ -13,7 +13,7 @@ class TransformerEncoderModel(nn.Module):
         self.hidden_size = hidden_size // num_directions  # 单向隐藏层大小
         self.num_layers = num_layers
         self.num_directions = num_directions  # 双向
-        self.if_position = if_position  # 是否使用位置编码
+        self.if_position = if_position  # 是否使用位置编码 
         
         # Transformer 参数
         self.d_model = hidden_size  # Transformer 的隐藏层大小

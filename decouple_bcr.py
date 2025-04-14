@@ -45,12 +45,10 @@ def parse():
 
     # model parameters
     parser.add_argument('--if_biattn',
-                        default=True,
-                        type=bool,
+                        action='store_true',
                         help='if use biattention in embedding')
     parser.add_argument('--if_position',
-                        default=True,
-                        type=bool,
+                        action='store_true',
                         help='if use positional embedding in transformer')
     parser.add_argument('--div',
                         type=str,
