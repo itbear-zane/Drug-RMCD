@@ -2,7 +2,6 @@ import os
 import random
 import numpy as np
 import torch
-from validate_util import validate_dev_sentence, validate_dev_sentence2
 from sklearn.metrics import roc_auc_score, average_precision_score, roc_curve, confusion_matrix, precision_recall_curve, precision_score
 import torch.nn.functional as F
 

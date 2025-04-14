@@ -3,11 +3,8 @@ import os
 import glob
 import time
 import torch
-from embedding import get_embeddings,get_glove_embedding
 from model import Sp_norm_model
 from train_util import train_one_epoch
-from validate_util import validate_dev_sentence
-from tensorboardX import SummaryWriter
 from dataloader import get_dataloader
 from utils import evaluate
 import copy
@@ -174,8 +171,6 @@ train_loader, dev_loader, test_loader = get_dataloader('biosnap', 'random', batc
 ######################
 # load model
 ######################
-writer=SummaryWriter(args.writer)
-
 model=Sp_norm_model(args)
 model.to(device)
 
