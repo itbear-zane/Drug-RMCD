@@ -115,6 +115,9 @@ def train_one_epoch(model, opt_gen,opt_pred, opt_embedding, dataset, device, arg
         gen_losses.append(gen_loss.cpu().detach().numpy())
         opt_gen.step()
         opt_gen.zero_grad()
+        if args.update_embedding_parameters_at_stage2:
+            opt_embedding.step()
+            opt_embedding.zero_grad()
         n1=0
         n2=0
         n3=0
