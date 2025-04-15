@@ -4,4 +4,3 @@ logs/
 test_demo.py
 __pycache__/
 wandb/
-__pycache__/

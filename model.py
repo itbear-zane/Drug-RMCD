@@ -525,23 +525,6 @@ class Sp_norm_model(nn.Module):
         return cls_logits
 
 
-    def g_skew(self,inputs, masks):
-        embedding, masks = self.embedding_layer(inputs, masks)
-        #  masks_ (batch_size, seq_length, 1)
-        masks_ = masks.unsqueeze(-1)
-        ########## Genetator ##########
-        embedding = masks_ * embedding  # (batch_size, seq_length, embedding_dim)
-        gen_output, _ = self.gen(embedding)  # (batch_size, seq_length, hidden_dim)
-        gen_output = self.layernorm1(gen_output)
-        gen_logits = self.gen_fc(self.dropout(gen_output))  # (batch_size, seq_length, 2)
-        soft_log=self._independent_soft_sampling(gen_logits)
-        return soft_log
-
-
-
-
-
-
 
 
 

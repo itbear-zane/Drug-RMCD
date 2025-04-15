@@ -46,7 +46,8 @@ python decouple_bcr.py \
     --hidden_dim 512 \
     --num_heads 8 \
     --num_layers 2 \
-    --if_biattn \
     --update_embedding_parameters_at_stage2 \
     --cell_type TransformerEncoder \
     --writer logs/train_dual_num_layers2
+
+    # --if_biattn \
