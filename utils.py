@@ -43,7 +43,8 @@ def evaluate(model, dev_loader, device):
             inputs, masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.type(torch.LongTensor).to(device)
 
             # rationales -- (batch_size, seq_length, 2)
-            cls_logits = model.train_one_step(inputs, masks)
+            # cls_logits = model.train_one_step(inputs, masks)
+            _, cls_logits = model(inputs, masks)
 
             # soft_pred = F.softmax(cls_logits, -1)
             # _, pred = torch.max(soft_pred, dim=-1)
