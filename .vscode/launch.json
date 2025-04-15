@@ -11,16 +11,39 @@
             "program": "decouple_bcr.py",
             "console": "integratedTerminal",
             "args": [
-                "--correlated", "1",
                 "--lr", "0.0001",
                 "--batch_size", "16",
                 "--gpu", "0",
                 "--sparsity_percentage", "0.175",
                 "--epochs", "150",
-                "--aspect", "0",
                 "--embedding_dim", "512",
-                "--if_biattn", "True",
+                "--hidden_dim", "512",
+                "--num_heads", "8",
+                "--num_layers", "2",
+                "--cell_type", "TransformerEncoder",
+                "--if_biattn",
                 "--writer", "test001"
+            ],
+        },
+        {
+            "name": "test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "decouple_bcr.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--lr", "0.0001",
+                "--batch_size", "16",
+                "--gpu", "0",
+                "--sparsity_percentage", "0.175",
+                "--epochs", "150",
+                "--embedding_dim", "512",
+                "--num_layers", "2",
+                "--cell_type", "TransformerEncoder",
+                "--if_biattn",
+                "--writer", "test001",
+                "--test",
+                "--checkpoint_path", "logs/train_use_biattn_num_layers2_transformerencoder/model_epoch_149.pth"
             ]
         }
     ]

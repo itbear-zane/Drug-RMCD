@@ -14,6 +14,16 @@
 # python decouple_bcr.py \
 #     --lr 0.0001 \
 #     --batch_size 128 \
+#     --gpu 0 --sparsity_percentage 0.175 --epochs 300 \
+#     --embedding_dim 64 \
+#     --num_layers 1 \
+#     --update_embedding_parameters \
+#     --cell_type GRU \
+#     --writer logs/train_test
+
+# python decouple_bcr.py \
+#     --lr 0.0001 \
+#     --batch_size 128 \
 #     --gpu 0 --sparsity_percentage 0.175 --epochs 150 \
 #     --embedding_dim 512 \
 #     --num_layers 2 \
@@ -48,16 +58,16 @@
 #     --cell_type TransformerDecoder \
 #     --writer logs/train_use_biattn_num_layers4_transformerdecoder
 
-python decouple_bcr.py \
-    --lr 0.0001 \
-    --batch_size 1 \
-    --gpu 0 --sparsity_percentage 0.175 --epochs 300 \
-    --embedding_dim 128 \
-    --num_layers 1 \
-    --if_biattn \
-    --update_embedding_parameters \
-    --cell_type TransformerEncoder \
-    --writer logs/train_test
+# python decouple_bcr.py \
+#     --lr 0.0001 \
+#     --batch_size 1 \
+#     --gpu 0 --sparsity_percentage 0.175 --epochs 300 \
+#     --embedding_dim 128 \
+#     --num_layers 1 \
+#     --if_biattn \
+#     --update_embedding_parameters \
+#     --cell_type TransformerEncoder \
+#     --writer logs/train_test
 
     # --resume --checkpoint_path logs/train_use_biattn_num_layers2_transformerencoder/model_epoch_149.pth \
 
