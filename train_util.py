@@ -18,7 +18,7 @@ class JS_DIV(nn.Module):
         m = (0.5 * (p_s + q_s)).log()
         return 0.5 * (self.kl_div(m, p_s.log()) + self.kl_div(m, q_s.log()))
 
-def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writer_epoch):
+def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, args, wanbd_run, epoch):
     TP = 0
     TN = 0
     FN = 0
@@ -31,7 +31,6 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
     batch_len=len(dataset)
     class_losses = []
     gen_losses = []
-    _, epoch = writer_epoch
     for (batch, (inputs, masks, labels)) in enumerate(tqdm(dataset, desc=f'Training epoch {epoch}')):
         opt_gen.zero_grad()
         opt_pred.zero_grad()
@@ -69,6 +68,8 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
         opt_pred.zero_grad()
         opt_gen.step()
         opt_gen.zero_grad()
+        opt_embedding.step()
+        opt_embedding.zero_grad()
 
         # train rationale with sparsity, continuity, js-div
         opt_gen.zero_grad()
@@ -93,7 +94,18 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
                 if p.requires_grad == True:
                     name4.append(idx)
                     p.requires_grad = False
-        print('name1={},name2={},name3={},name4={}'.format(len(name1), len(name2), len(name3), len(name4)))
+        if not args.update_embedding_parameters_at_stage2:
+            name5=[]
+            for idx,p in model.drug_embedding_layer.named_parameters():
+                if p.requires_grad == True:
+                    name5.append(idx)
+                    p.requires_grad = False
+            name6=[]
+            for idx,p in model.prot_embedding_layer.named_parameters():
+                if p.requires_grad == True:
+                    name6.append(idx)
+                    p.requires_grad = False
+            print('name1={},name2={},name3={},name4={},name5={},name6={}'.format(len(name1), len(name2), len(name3), len(name4), len(name5), len(name6)))
         
         drug_rationales, drug_masks = model.get_rationale(inputs, org_masks, type='drug')
         prot_ratioanles, prot_masks = model.get_rationale(inputs, org_masks, type='prot')
@@ -130,6 +142,10 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
         
         opt_gen.step()
         opt_gen.zero_grad()
+        
+        if args.update_embedding_parameters_at_stage2:
+            opt_embedding.step()
+            opt_embedding.zero_grad()
 
         n1=0
         n2=0
@@ -153,7 +169,19 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
                 if idx in name4:
                     p.requires_grad=True
                     n4+=1
-        print('recover name1={},name2={},name3={},name4={}'.format(n1, n2, n3, n4))
+        if not args.update_embedding_parameters_at_stage2:
+            n5=0
+            for idx,p in model.drug_embedding_layer.named_parameters():
+                if idx in name5:
+                    p.requires_grad = True
+                    n5 += 1
+            n6=0
+            for idx,p in model.prot_embedding_layer.named_parameters():
+                if idx in name6:
+                    p.requires_grad = True
+                    n6 += 1 
+                    
+            print('recover name1={},name2={},name3={},name4={},name5={},name6={}'.format(n1, n2, n3, n4, n5, n6))
         
 
         cls_soft_logits = torch.softmax(forward_logit, dim=-1)
@@ -171,17 +199,10 @@ def train_decouple_causal2(model, opt_gen, opt_pred, dataset, device, args, writ
         spar_l += sparsity_loss.cpu().item()
         cont_l += continuity_loss.cpu().item()
         js+=jsd_loss.cpu().item()
-        # print(TP, TN, FN, FP)
-        print(f'avg classification_loss: {np.array(class_losses).mean()}')
-        print(f'avg gen_loss: {np.array(gen_losses).mean()}')
+    wanbd_run.log({"train/avg_cls_loss": np.array(class_losses).mean(), "train/avg_gen_loss": np.array(gen_losses).mean(), "epoch": epoch})
     precision = TP / (TP + FP)
     recall = TP / (TP + FN)
     f1_score = 2 * recall * precision / (recall + precision)
     accuracy = (TP + TN) / (TP + TN + FP + FN)
-    writer_epoch[0].add_scalar('cls', cls_l, writer_epoch[1])
-    writer_epoch[0].add_scalar('spar_l', spar_l, writer_epoch[1])
-    writer_epoch[0].add_scalar('cont_l', cont_l, writer_epoch[1])
-    writer_epoch[0].add_scalar('js', js, writer_epoch[1])
-    writer_epoch[0].add_scalar('train_sp', np.mean(train_sp), writer_epoch[1])
     return precision, recall, f1_score, accuracy
 
