@@ -284,8 +284,6 @@ for epoch in range(start_epoch, args.epochs):
         best_auroc = auroc
         best_epoch = epoch
 
-    # 检查是否需要保存模型
-    if (epoch + 1) % args.save_interval == 0:
         auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity = evaluate(model, test_loader, device)
         print("test results: auroc:{:.4f}, auprc:{:.4f}, recall:{:.4f} precision:{:.4f} f1-score:{:.4f} accuracy:{:.4f} sensitivity:{:.4f} specificity:{:.4f}"\
             .format(auroc, auprc, recall, precision, f1_score, accuracy, sensitivity, specificity))
