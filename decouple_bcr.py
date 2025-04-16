@@ -57,7 +57,7 @@ def parse():
     parser.add_argument('--cell_type',
                         type=str,
                         default="GRU",
-                        help='Cell type: LSTM, GRU, TransformerDecoder, TransformerEncoder [default: GRU]')
+                        help='Cell type: LSTM, GRU, TransformerDecoder, TransformerEncoder, MaskDecoder [default: GRU]')
     parser.add_argument('--num_layers',
                         type=int,
                         default=1,
