@@ -228,25 +228,10 @@ class Classifier(nn.Module):
         return x
 
 
-class Generator(nn.Module):
-    def __init__(self, gen, layernorm, dropout, gen_fc):
-        super().__init__()
-        self.gen = gen
-        self.layernorm = layernorm
-        self.dropout = dropout
-        self.gen_fc = gen_fc
-    
-    def forward(self, x, mask):
-        gen_output = self.gen(x, src_key_padding_mask=~mask.bool())
-        layer_output = self.layernorm(gen_output)
-        drop_output = self.dropout(layer_output)
-        res = self.gen_fc(drop_output)
-        return res
 
-
-class Sp_norm_model(nn.Module):
+class DrugRMCD(nn.Module):
     def __init__(self, args):
-        super(Sp_norm_model, self).__init__()
+        super(DrugRMCD, self).__init__()
         self.args = args
         self.drug_embedding_layer = Projector(input_dim=768,
                                             out_dim=args.embedding_dim, 
@@ -282,7 +267,7 @@ class Sp_norm_model(nn.Module):
         layernorm = nn.LayerNorm(args.embedding_dim)
         dropout = nn.Dropout(args.dropout)
         gen_fc = nn.Linear(args.embedding_dim, 2)
-        generator = Generator(gen,
+        generator = nn.Sequential(gen,
                             layernorm,
                             dropout,
                             gen_fc)
@@ -302,19 +287,9 @@ class Sp_norm_model(nn.Module):
         )
         return encoder
         
-    def _independent_soft_sampling(self, rationale_logits):
-        """
-        Use the hidden states at all time to sample whether each word is a rationale or not.
-        No dependency between actions. Return the sampled (soft) rationale mask.
-        Outputs:
-                z -- (batch_size, sequence_length, 2)
-        """
-        z = torch.softmax(rationale_logits, dim=-1)
-
-        return z
-
     def independent_straight_through_sampling(self, rationale_logits):
         """
+        Use the hidden states at all time to sample whether each word is a rationale or not.
         Straight through sampling.
         Outputs:
             z -- shape (batch_size, sequence_length, 2)
@@ -330,14 +305,14 @@ class Sp_norm_model(nn.Module):
         prot_masks = masks[1]
 
         ########## Genetator ##########
-        drug_gen_logits=self.drug_generator(drug_embedding, drug_masks) # (batch_size, seq_length, 2)
-        prot_gen_logits=self.prot_generator(prot_embedding, prot_masks) # (batch_size, seq_length, 2)
+        drug_gen_logits=self.drug_generator(drug_embedding, src_key_padding_mask=drug_masks.bool()) # (batch_size, seq_length, 2)
+        prot_gen_logits=self.prot_generator(prot_embedding, src_key_padding_mask=prot_masks.bool()) # (batch_size, seq_length, 2)
         ########## Sample ##########
         drug_z = self.independent_straight_through_sampling(drug_gen_logits)  # (batch_size, seq_length, 2)
         prot_z = self.independent_straight_through_sampling(prot_gen_logits)  # (batch_size, seq_length, 2)
         ########## Classifier ##########
-        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=~drug_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=~prot_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
+        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=drug_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=prot_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
 
         fusion_output, _ = self.bi_attention(drug_enc_output, prot_enc_output) # (batch_size, hidden_dim)
         # shape -- (batch_size, num_classes)
@@ -351,8 +326,8 @@ class Sp_norm_model(nn.Module):
         drug_masks= masks[0]
         prot_masks = masks[1]
 
-        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=~drug_masks.bool())  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=~prot_masks.bool())  # (batch_size, seq_length, hidden_dim)
+        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=drug_masks.bool())  # (batch_size, seq_length, hidden_dim)
+        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=prot_masks.bool())  # (batch_size, seq_length, hidden_dim)
 
         fusion_output, _ = self.bi_attention(drug_enc_output, prot_enc_output) # (batch_size, hidden_dim)
         # shape -- (batch_size, num_classes)
@@ -364,19 +339,18 @@ class Sp_norm_model(nn.Module):
         ########## Genetator ##########
         if type == 'drug':
             embedding = self.drug_embedding_layer(inputs[0])  # (batch_size, seq_length, embedding_dim)
-            mask = masks[0] == 1
-            gen_logits = self.drug_generator(embedding, mask) # (batch_size, seq_length, 2)    
+            mask = masks[0]
+            gen_logits = self.drug_generator(embedding, src_key_padding_mask=mask.bool()) # (batch_size, seq_length, 2)    
         elif type == 'prot':
             embedding = self.prot_embedding_layer(inputs[1])  # (batch_size, seq_length, embedding_dim)
-            mask = masks[1] == 1
-            gen_logits = self.prot_generator(embedding, mask)  # (batch_size, seq_length, 2)
+            mask = masks[1]
+            gen_logits = self.prot_generator(embedding, src_key_padding_mask=mask.bool())  # (batch_size, seq_length, 2)
         else:
             raise NotImplementedError('type {} is not implemented'.format(type))
         ########## Sample ##########
         z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
 
-        mask = mask.unsqueeze(-1)
-        return z, mask            
+        return z         
     
     def pred_forward_logit(self, inputs, drug_z, prot_z):
         drug_embedding = self.drug_embedding_layer(inputs[0]) # (batch_size, seq_length, embedding_dim)
@@ -389,19 +363,6 @@ class Sp_norm_model(nn.Module):
         # shape -- (batch_size, num_classes)
         cls_logits = self.cls_fc(fusion_output)
         return cls_logits
-
-
-    def g_skew(self,inputs, masks):
-        embedding, masks = self.embedding_layer(inputs, masks)
-        #  masks_ (batch_size, seq_length, 1)
-        masks_ = masks.unsqueeze(-1)
-        ########## Genetator ##########
-        embedding = masks_ * embedding  # (batch_size, seq_length, embedding_dim)
-        gen_output, _ = self.gen(embedding)  # (batch_size, seq_length, hidden_dim)
-        gen_output = self.layernorm1(gen_output)
-        gen_logits = self.gen_fc(self.dropout(gen_output))  # (batch_size, seq_length, 2)
-        soft_log=self._independent_soft_sampling(gen_logits)
-        return soft_log
 
 
 
