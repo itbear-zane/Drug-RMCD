@@ -1,4 +1,6 @@
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 def get_sparsity_loss(z, mask, level):
@@ -23,45 +25,21 @@ def get_continuity_loss(z):
     return torch.mean(torch.abs(z[:, 1:] - z[:, :-1]))
 
 
-def compute_micro_stats(labels, predictions):
-    """
-    Inputs:
-        labels binary sequence indicates the if it is rationale
-        predicitions -- sequence indicates the probability of being rationale
-
-        labels -- (batch_size, sequence_length)
-        predictions -- (batch_size, sequence_length) in soft probability
-
-    Outputs:
-        Number of true positive among predicition (True positive)
-        Number of predicted positive (True pos + false pos)
-        Number of real positive in the labels (true pos + false neg)
-    """
-
-    # threshold predictions
-    predictions = (predictions > 0.5).long()
-
-    # cal precision, recall
-    num_true_pos = torch.sum(labels * predictions)
-    num_predicted_pos = torch.sum(predictions)
-    num_real_pos = torch.sum(labels)
-
-    return num_true_pos, num_predicted_pos, num_real_pos
+def binary_cross_entropy(pred_output, labels):
+    loss_fct = torch.nn.BCELoss()
+    m = nn.Sigmoid()
+    n = torch.squeeze(m(pred_output), 1)
+    loss = loss_fct(n, labels)
+    return n, loss
 
 
-def computer_pre_rec(pred, target):
-    # TP predict 和 label 同时为1
-    TP, TN, FN, FP = 0, 0, 0, 0
-    TP += ((pred == 1) & (target == 1)).cpu().sum()
-    # TN predict 和 label 同时为0
-    TN += ((pred == 0) & (target == 0)).cpu().sum()
-    # FN predict 0 label 1
-    FN += ((pred == 0) & (target == 1)).cpu().sum()
-    # FP predict 1 label 0
-    FP += ((pred == 1) & (target == 0)).cpu().sum()
-
-    precision = TP / (TP + FP)
-    recall = TP / (TP + FN)
-    f1_score = 2 * recall * precision / (recall + precision)
-    accuracy = (TP + TN) / (TP + TN + FP + FN)
-    return precision, recall, f1_score, accuracy
+class JS_DIV(nn.Module):
+    def __init__(self):
+        super(JS_DIV, self).__init__()
+        self.kl_div=nn.KLDivLoss(reduction='batchmean',log_target=True)
+    def forward(self,p,q):
+        p_s=F.softmax(p,dim=-1)
+        q_s=F.softmax(q,dim=-1)
+        p_s, q_s = p_s.view(-1, p_s.size(-1)), q_s.view(-1, q_s.size(-1))
+        m = (0.5 * (p_s + q_s)).log()
+        return 0.5 * (self.kl_div(m, p_s.log()) + self.kl_div(m, q_s.log()))
