@@ -2,8 +2,17 @@ import os
 import random
 import numpy as np
 import torch
-from validate_util import validate_dev_sentence
-from sklearn.metrics import roc_auc_score, average_precision_score, confusion_matrix
+import os
+import random
+import numpy as np
+import torch
+from datetime import datetime
+import shutil
+import glob
+from pathlib import Path
+import time
+import logging
+from logging import Logger
 
 
 def set_seed(seed=1000):
@@ -34,52 +43,101 @@ def mkdir(path):
     if not is_exists:
         os.makedirs(path)
         
-def evaluate(model, dev_loader, writer, epoch):
-    TP = 0
-    TN = 0
-    FN = 0
-    FP = 0
-    y_labels = []
-    y_preds = []
-    model.eval()
-    device = "cuda:0"
-    print("Validate")
-    with torch.no_grad():
-        for (batch, (inputs, masks, labels)) in enumerate(dev_loader):
-            # inputs, masks, labels = inputs.to(device), masks.to(device), labels.to(device)
-            inputs, masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.to(device)
-            _, logits = model(inputs, masks)
-            # pdb.set_trace()
-            logits = torch.softmax(logits, dim=-1)
-            _, pred = torch.max(logits, axis=-1)
 
-            y_labels += labels.cpu().numpy().tolist()
-            y_preds += pred.cpu().numpy().tolist()
-            
-            # compute accuarcy
-            # TP predict 和 label 同时为1
-            TP += ((pred == 1) & (labels == 1)).cpu().sum()
-            # TN predict 和 label 同时为0
-            TN += ((pred == 0) & (labels == 0)).cpu().sum()
-            # FN predict 0 label 1
-            FN += ((pred == 0) & (labels == 1)).cpu().sum()
-            # FP predict 1 label 0
-            FP += ((pred == 1) & (labels == 0)).cpu().sum()
-        print(TP, TN, FN, FP)
-        precision = TP / (TP + FP)
-        recall = TP / (TP + FN)
-        f1_score = 2 * precision * recall / (recall + precision)
-        accuracy = (TP + TN) / (TP + TN + FP + FN)
+def get_checkpoint_name(epoch):
+    """Generate checkpoint filename
+    Args:
+        epoch: Current epoch number
+    Returns:
+        str: Formatted checkpoint filename
+    """
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    return f'checkpoint_latest_{timestamp}.pth'
+
+
+def save_checkpoint(state, is_best, checkpoint_dir):
+    """Save model checkpoint - keeps only latest and best
+    Args:
+        state: Dictionary containing state to save
+        is_best: Boolean indicating if this is the best model so far
+        checkpoint_dir: Directory path to save checkpoint
+    """
+    # Ensure directory exists
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    # Save latest checkpoint
+    latest_filename = get_checkpoint_name(state['epoch'])
+    latest_filepath = os.path.join(checkpoint_dir, latest_filename)
+    
+    # Remove old latest checkpoint if exists
+    old_latest = glob.glob(os.path.join(checkpoint_dir, 'checkpoint_latest_*.pth'))
+    for old_file in old_latest:
+        os.remove(old_file)
         
-        y_labels, y_preds = np.array(y_labels), np.array(y_preds)
-        auroc = roc_auc_score(y_labels, y_preds)
-        auprc = average_precision_score(y_labels, y_preds)
-        
-        cm1 = confusion_matrix(y_labels, y_preds)
-        sensitivity = cm1[0, 0] / (cm1[0, 0] + cm1[0, 1])
-        specificity = cm1[1, 1] / (cm1[1, 0] + cm1[1, 1])
-        
-        print("Validate Sentence")
-        validate_dev_sentence(model, dev_loader, device,(writer,epoch))
-        
-        return auroc, auprc, precision, recall, f1_score, accuracy, sensitivity, specificity
+    # Save new latest checkpoint
+    torch.save(state, latest_filepath)
+    print(f"Latest checkpoint saved: {latest_filepath}")
+    
+    # If this is the best model, save as best model
+    if is_best:
+        best_filepath = os.path.join(checkpoint_dir, 'model_best.pth')
+        shutil.copy(latest_filepath, best_filepath)
+        print(f"Best model saved: {best_filepath}")
+
+
+def load_latest_checkpoint(checkpoint_dir, start_epoch, model, optimizer_gen, optimizer_pred):
+    """Load the latest checkpoint
+    Args:
+        checkpoint_dir: Checkpoint directory
+        model: Model to load weights into
+        optimizer: Optimizer to load state into
+        scheduler: Learning rate scheduler to load state into
+    Returns:
+        epoch: Epoch to resume training from
+        best_loss: Best loss achieved so far
+    """
+    # Try to load latest checkpoint first
+    latest_checkpoints = glob.glob(os.path.join(checkpoint_dir, 'checkpoint_latest_*.pth'))
+    
+    if latest_checkpoints:
+        checkpoint_path = latest_checkpoints[0]
+    else:
+        # If no latest checkpoint, try to load best model
+        best_model_path = os.path.join(checkpoint_dir, 'model_best.pth')
+        if os.path.exists(best_model_path):
+            checkpoint_path = best_model_path
+        else:
+            print("No checkpoints found")
+            return 0, float('inf')
+    
+    print(f"Loading checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path)
+    
+    start_epoch = checkpoint['epoch']
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer_gen.load_state_dict(checkpoint['optimizer_gen_state_dict'])
+    optimizer_pred.load_state_dict(checkpoint['optimizer_pred_state_dict'])
+    
+    return start_epoch, model, optimizer_gen, optimizer_pred
+
+
+def construct_logger(logger_dir: Path) -> Logger:
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    os.makedirs(logger_dir, exist_ok=True)
+    file_handler = logging.FileHandler(
+        f"{logger_dir}/log_{time.strftime('%Y-%m-%d_%H:%M:%S', time.localtime())}.txt")
+    file_handler.setLevel(logging.INFO)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
