@@ -1,5 +1,6 @@
 .vscode/
-logs/
+loggers/
+checkpoints/
 *.out
 test_demo.py
 __pycache__/
