@@ -8,19 +8,15 @@
             "name": "train",
             "type": "debugpy",
             "request": "launch",
-            "program": "decouple_bcr.py",
+            "program": "main.py",
             "console": "integratedTerminal",
             "args": [
-                "--correlated", "1",
-                "--lr", "0.0001",
+                "--lr1", "0.0001",
+                "--lr2", "0.0001",
                 "--batch_size", "16",
-                "--gpu", "0",
                 "--sparsity_percentage", "0.175",
                 "--epochs", "150",
-                "--aspect", "0",
-                "--embedding_dim", "512",
-                "--if_biattn", "True",
-                "--writer", "test001"
+                "--embedding_dim", "128"
             ]
         }
     ]

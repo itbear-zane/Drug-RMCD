@@ -28,7 +28,7 @@ def parse():
     parser.add_argument('--mlp_in_dim', type=int, default=128, help='MLP input dims [default: 128]')
     parser.add_argument('--mlp_hidden_dim', type=int, default=512, help='MLP hidden dims [default: 512]')
     parser.add_argument('--mlp_out_dim', type=int, default=128, help='MLP output dims [default: 128]')
-    parser.add_argument('--num_class', type=int, default=1, help='Num of classes [default: 1]')
+    parser.add_argument('--num_class', type=int, default=2, help='Num of classes [default: 1]')
 
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate [default: 0.2]')
     parser.add_argument('--div', type=str, default='kl', help='kl loss')
@@ -36,8 +36,8 @@ def parse():
     # learning parameters
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epoch')
     parser.add_argument("--patience", type=int, default=5, help="Patience for early stopping")
-    parser.add_argument('--lr1', type=float, default=0.001, help='Learning rate [default: 1e-3]')
-    parser.add_argument('--lr2', type=float, default=0.001, help='Learning rate [default: 1e-3]')
+    parser.add_argument('--lr1', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
+    parser.add_argument('--lr2', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
     parser.add_argument('--sparsity_lambda', type=float, default=6., help='Sparsity trade-off [default: 1.]')
     parser.add_argument('--continuity_lambda', type=float, default=6., help='Continuity trade-off [default: 4.]')
     parser.add_argument('--sparsity_percentage', type=float, default=0.1, help='Sparsity percentage [default: .2]')
@@ -78,34 +78,21 @@ model.to(args.device)
 # Set up optimizer
 # Generator
 g_para=[]
-for p in model.drug_generator.parameters():
-    if p.requires_grad==True:
-        g_para.append(p)
-for p in model.prot_generator.parameters():
+for p in model.generator.parameters():
     if p.requires_grad==True:
         g_para.append(p)
 
 # Predictor
 p_para=[]
-for p in model.drug_embedding_layer.parameters():
+for p in model.embedding_layer.parameters():
     if p.requires_grad==True:
         p_para.append(p)
-for p in model.prot_embedding_layer.parameters():
-    if p.requires_grad==True:
-        p_para.append(p)
-for p in model.drug_encoder.parameters():
-    if p.requires_grad==True:
-        p_para.append(p)
-for p in model.prot_encoder.parameters():
+for p in model.encoder.parameters():
     if p.requires_grad==True:
         p_para.append(p)
 for p in model.cls_fc.parameters():
     if p.requires_grad==True:
         p_para.append(p)
-if args.if_biattn:
-    for p in model.bi_attention.parameters():
-        if p.requires_grad==True:
-            p_para.append(p)
 
 # g_para=filter(lambda p: p.requires_grad==True, model.generator.parameters())
 para_gen=[{'params': g_para, 'lr':args.lr1}]
@@ -124,7 +111,7 @@ train(model, optimizer_gen, optimizer_pred, train_loader, val_loader, logger, ar
 # Testing
 ######################
 model = DrugRMCD(args)
-model.load_state_dict(torch.load(f'{args.model_save_dir}/best_model.pth')['model_state_dict'])
+model.load_state_dict(torch.load(f'{args.model_save_dir}/model_best.pth')['model_state_dict'])
 model.to(args.device)
 auroc, auprc, f1, sensitivity, specificity, accuracy, test_loss, thred_optim, precision = evaluate(model, test_loader, args.device, mode="test")
 logger.info("Test results: Auroc:{:.4f}, Auprc:{:.4f}, F1:{:.4f}, Sensitivity:{:.4f}, Specificity:{:.4f}, Accuracy:{:.4f}, Thred_optim:{:.4f}, Precision:{:.4f}"\

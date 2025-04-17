@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from sklearn.metrics import  roc_auc_score, average_precision_score, roc_curve, confusion_matrix, \
     precision_recall_curve, precision_score 
-from metric import get_sparsity_loss, get_continuity_loss, binary_cross_entropy, JS_DIV
+from metric import get_sparsity_loss, get_continuity_loss, binary_cross_entropy, JS_DIV, cross_entropy_logits
 from utils import save_checkpoint, load_latest_checkpoint
 
 
@@ -23,32 +23,23 @@ def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
     for (_, (inputs, masks, labels)) in enumerate(tqdm(dataset, desc=f'Training epoch {epoch}')):
         opt_gen.zero_grad()
         opt_pred.zero_grad()
-        inputs, org_masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.type(torch.LongTensor).to(device)
+        inputs, org_masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.type(torch.float).to(device)
 
         #train classification
-        drug_rationales = model.get_rationale(inputs, org_masks, type='drug')
-        prot_ratioanles = model.get_rationale(inputs, org_masks, type='prot')
+        rationales, masks = model.get_rationale(inputs, org_masks)
 
-        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            drug_rationales[:, :, 1], org_masks[0], args.sparsity_percentage)
-        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            prot_ratioanles[:, :, 1], org_masks[1], args.sparsity_percentage)
-        sparsity_loss = drug_sparsity_loss + prot_sparsity_loss
+        sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
+            rationales[:, :, 1], masks, args.sparsity_percentage)
 
-        train_sp.append((torch.sum(drug_rationales[:, :, 1]) / torch.sum(org_masks[0])).cpu().item() + 
-            (torch.sum(prot_ratioanles[:, :, 1]) / torch.sum(org_masks[1])).cpu().item())
+        train_sp.append((torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item())
 
-        drug_continuity_loss = args.continuity_lambda * get_continuity_loss(
-            drug_rationales[:, :, 1])
-        prot_continuity_loss = args.continuity_lambda * get_continuity_loss(
-            prot_ratioanles[:, :, 1])
-        continuity_loss = drug_continuity_loss + prot_continuity_loss
+        continuity_loss = args.continuity_lambda * get_continuity_loss(rationales[:, :, 1])
 
-        forward_logit = model.pred_forward_logit(inputs, torch.detach(drug_rationales), torch.detach(prot_ratioanles))
+        forward_logit = model.pred_forward_logit(inputs, org_masks, torch.detach(rationales))
         full_text_logits = model.train_one_step(inputs, org_masks)
 
-        cls_loss = args.cls_lambda * binary_cross_entropy(forward_logit, labels)[1]
-        full_text_cls_loss = args.cls_lambda * binary_cross_entropy(full_text_logits, labels)[1]
+        cls_loss = args.cls_lambda * cross_entropy_logits(forward_logit, labels)[1]
+        full_text_cls_loss = args.cls_lambda * cross_entropy_logits(full_text_logits, labels)[1]
 
         classification_loss = cls_loss + full_text_cls_loss + sparsity_loss + continuity_loss
         class_losses.append(classification_loss.cpu().detach().numpy())
@@ -64,22 +55,11 @@ def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
         name1=[]
         name2=[]
         name3=[]
-        name4=[]
-        name5=[]
-        name6=[]
-        for idx, p in model.drug_embedding.named_parameters():
+        for idx, p in model.embedding_layer.named_parameters():
             if p.requires_grad == True:
-                name5.append(idx)
-                p.requires_grad = False
-        for idx, p in model.prot_embedding.named_parameters():
-            if p.requires_grad == True:
-                name6.append(idx)
-                p.requires_grad = False
-        for idx,p in model.drug_encoder.named_parameters():
-            if p.requires_grad==True:
                 name1.append(idx)
-                p.requires_grad=False
-        for idx,p in model.prot_encoder.named_parameters():
+                p.requires_grad = False
+        for idx,p in model.encoder.named_parameters():
             if p.requires_grad==True:
                 name2.append(idx)
                 p.requires_grad=False
@@ -87,19 +67,12 @@ def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
             if p.requires_grad == True:
                 name3.append(idx)
                 p.requires_grad = False
-        if args.if_biattn:
-            for idx,p in model.bi_attention.named_parameters():
-                if p.requires_grad == True:
-                    name4.append(idx)
-                    p.requires_grad = False
-        print('freeze name1={},name2={},name3={},name4={},name5={},name6={}'.format(name1, name2, name3, name4, name5, name6))
+        #print('freeze name1={},name2={},name3={},name4={},name5={},name6={}'.format(name1, name2, name3, name4, name5, name6))
         
-        drug_rationales = model.get_rationale(inputs, org_masks, type='drug')
-        prot_ratioanles = model.get_rationale(inputs, org_masks, type='prot')
-
+        rationales, masks = model.get_rationale(inputs, org_masks)
         #rationales, masks = model.get_rationale(inputs, org_masks)
 
-        forward_logit = model.pred_forward_logit(inputs, drug_rationales, prot_ratioanles)
+        forward_logit = model.pred_forward_logit(inputs, org_masks, rationales)
         full_text_logits = model.train_one_step(inputs, org_masks)
         if args.div=='js':
             jsd_func = JS_DIV()
@@ -108,21 +81,11 @@ def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
             jsd_loss=nn.functional.kl_div(F.softmax(forward_logit,dim=-1).log(), 
                                           F.softmax(full_text_logits,dim=-1), reduction='batchmean')
 
-        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            drug_rationales[:, :, 1], org_masks[0], args.sparsity_percentage)
-        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            prot_ratioanles[:, :, 1], org_masks[1], args.sparsity_percentage)
-        sparsity_loss = drug_sparsity_loss + prot_sparsity_loss
+        sparsity_loss = args.sparsity_lambda * get_sparsity_loss(rationales[:, :, 1], masks, args.sparsity_percentage)
         
-        train_sp.append(
-            (torch.sum(drug_rationales[:, :, 1]) / torch.sum(org_masks[0])).cpu().item() + 
-            (torch.sum(prot_ratioanles[:, :, 1]) / torch.sum(org_masks[1])).cpu().item())
+        train_sp.append((torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item())
 
-        drug_continuity_loss = args.continuity_lambda * get_continuity_loss(
-            drug_rationales[:, :, 1])
-        prot_continuity_loss = args.continuity_lambda * get_continuity_loss(
-            prot_ratioanles[:, :, 1])
-        continuity_loss = drug_continuity_loss + prot_continuity_loss
+        continuity_loss = args.continuity_lambda * get_continuity_loss(rationales[:, :, 1])
         
         gen_loss = sparsity_loss + continuity_loss + jsd_loss
         gen_losses.append(gen_loss.cpu().detach().numpy())
@@ -134,36 +97,20 @@ def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
         n1=0
         n2=0
         n3=0
-        n4=0
-        n5=0
-        n6=0
         #############recover the parameters#############
-        for idx, p in model.drug_embedding.named_parameters():
-            if idx in name5:
-                p.requires_grad = True
-                n5+=1
-        for idx, p in model.prot_embedding.named_parameters():
-            if idx in name6:
-                p.requires_grad = True
-                n6+=1
-        for idx,p in model.drug_encoder.named_parameters():
+        for idx, p in model.embedding_layer.named_parameters():
             if idx in name1:
-                p.requires_grad=True
+                p.requires_grad = True
                 n1+=1
-        for idx,p in model.prot_encoder.named_parameters():
-            if idx in name2:
+        for idx,p in model.encoder.named_parameters():
+            if idx in name1:
                 p.requires_grad=True
                 n2+=1
         for idx,p in model.cls_fc.named_parameters():
             if idx in name3:
                 p.requires_grad=True
                 n3+=1
-        if args.if_biattn:
-            for idx,p in model.bi_attention.named_parameters():
-                if idx in name4:
-                    p.requires_grad=True
-                    n4+=1
-        print('recover n1={},n2={},n3={},n4={},n5={},n6={}'.format(n1, n2, n3, n4, n5, n6))
+        #print('recover n1={},n2={},n3={},n4={},n5={},n6={}'.format(n1, n2, n3, n4, n5, n6))
         
         cls_l += cls_loss.cpu().item()
         spar_l += sparsity_loss.cpu().item()
@@ -191,9 +138,9 @@ def evaluate(model, dataloader, device, mode=None):
         for (_, (inputs, masks, labels)) in enumerate(dataloader):
             # inputs, masks, labels = inputs.to(device), masks.to(device), labels.to(device)
             inputs, masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.to(device)
-            _, _, logits = model(inputs, masks)
+            _, logits = model(inputs, masks)
             # pdb.set_trace()
-            n, loss = binary_cross_entropy(logits, labels)
+            n, loss = cross_entropy_logits(logits, labels)
             test_losses.append(loss.cpu().detach().numpy())
 
             y_label = y_label + labels.to("cpu").tolist()
@@ -234,7 +181,6 @@ def train(model, optimizer_gen, optimizer_pred, train_loader, val_loader, logger
     
     # Set up early stopping
     best_auroc = 0
-    epochs_without_improvement = 0
 
     for epoch in range(start_epoch, args.epochs):
         # Train
@@ -264,9 +210,6 @@ def train(model, optimizer_gen, optimizer_pred, train_loader, val_loader, logger
         if is_best:
             best_auroc = auroc
             checkpoint['auroc'] = best_auroc
-            epochs_without_improvement = 0
-        else:
-            epochs_without_improvement += 1
 
         # Save the checkpoint
         save_checkpoint(
@@ -274,8 +217,3 @@ def train(model, optimizer_gen, optimizer_pred, train_loader, val_loader, logger
             is_best=is_best,
             checkpoint_dir=args.model_save_dir,
         )
-
-        # Early stopping
-        if epochs_without_improvement >= args.patience:
-            logger.info(f'Early stopping triggered after {epoch + 1} epochs.')
-            break

@@ -5,151 +5,234 @@ from torch.nn.utils.weight_norm import weight_norm
 
 
 
-class BANLayer(nn.Module):
-    def __init__(self, v_dim, q_dim, h_dim, h_out, act='ReLU', dropout=0.2, k=3):
-        super(BANLayer, self).__init__()
+def drop_path(x, drop_prob: float = 0., training: bool = False, scale_by_keep: bool = True):
+    """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
-        self.c = 32
-        self.k = k
-        self.v_dim = v_dim
-        self.q_dim = q_dim
-        self.h_dim = h_dim
-        self.h_out = h_out
+    This is the same as the DropConnect impl I created for EfficientNet, etc networks, however,
+    the original name is misleading as 'Drop Connect' is a different form of dropout in a separate paper...
+    See discussion: https://github.com/tensorflow/tpu/issues/494#issuecomment-532968956 ... I've opted for
+    changing the layer and argument names to 'drop path' rather than mix DropConnect as a layer name and use
+    'survival rate' as the argument.
 
-        self.v_net = FCNet([v_dim, h_dim * self.k], act=act, dropout=dropout)
-        self.q_net = FCNet([q_dim, h_dim * self.k], act=act, dropout=dropout)
-        # self.dropout = nn.Dropout(dropout[1])
-        if 1 < k:
-            self.p_net = nn.AvgPool1d(self.k, stride=self.k)
-
-        if h_out <= self.c:
-            self.h_mat = nn.Parameter(torch.Tensor(1, h_out, 1, h_dim * self.k).normal_())
-            self.h_bias = nn.Parameter(torch.Tensor(1, h_out, 1, 1).normal_())
-        else:
-            self.h_net = weight_norm(nn.Linear(h_dim * self.k, h_out), dim=None)
-
-        self.bn = nn.BatchNorm1d(h_dim)
-
-    def attention_pooling(self, v, q, att_map):
-        fusion_logits = torch.einsum('bvk,bvq,bqk->bk', (v, att_map, q))
-        if 1 < self.k:
-            fusion_logits = fusion_logits.unsqueeze(1)  # b x 1 x d
-            fusion_logits = self.p_net(fusion_logits).squeeze(1) * self.k  # sum-pooling
-        return fusion_logits
-
-    def forward(self, v, q, softmax=False):
-        v_num = v.size(1)
-        q_num = q.size(1)
-        if self.h_out <= self.c:
-            v_ = self.v_net(v)
-            q_ = self.q_net(q)
-            att_maps = torch.einsum('xhyk,bvk,bqk->bhvq', (self.h_mat, v_, q_)) + self.h_bias
-        else:
-            v_ = self.v_net(v).transpose(1, 2).unsqueeze(3)
-            q_ = self.q_net(q).transpose(1, 2).unsqueeze(2)
-            d_ = torch.matmul(v_, q_)  # b x h_dim x v x q
-            att_maps = self.h_net(d_.transpose(1, 2).transpose(2, 3))  # b x v x q x h_out
-            att_maps = att_maps.transpose(2, 3).transpose(1, 2)  # b x h_out x v x q
-        if softmax:
-            p = nn.functional.softmax(att_maps.view(-1, self.h_out, v_num * q_num), 2)
-            att_maps = p.view(-1, self.h_out, v_num, q_num)
-        logits = self.attention_pooling(v_, q_, att_maps[:, 0, :, :])
-        for i in range(1, self.h_out):
-            logits_i = self.attention_pooling(v_, q_, att_maps[:, i, :, :])
-            logits += logits_i
-        logits = self.bn(logits)
-        return logits, att_maps
-
-
-class FCNet(nn.Module):
-    """Simple class for non-linear fully connect network
-    Modified from https://github.com/jnhwkim/ban-vqa/blob/master/fc.py
     """
+    if drop_prob == 0. or not training:
+        return x
+    keep_prob = 1 - drop_prob
+    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
+    random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
+    if keep_prob > 0.0 and scale_by_keep:
+        random_tensor.div_(keep_prob)
+    return x * random_tensor
 
-    def __init__(self, dims, act='ReLU', dropout=0):
-        super(FCNet, self).__init__()
-
-        layers = []
-        for i in range(len(dims) - 2):
-            in_dim = dims[i]
-            out_dim = dims[i + 1]
-            if 0 < dropout:
-                layers.append(nn.Dropout(dropout))
-            layers.append(weight_norm(nn.Linear(in_dim, out_dim), dim=None))
-            if '' != act:
-                layers.append(getattr(nn, act)())
-        if 0 < dropout:
-            layers.append(nn.Dropout(dropout))
-        layers.append(weight_norm(nn.Linear(dims[-2], dims[-1]), dim=None))
-        if '' != act:
-            layers.append(getattr(nn, act)())
-
-        self.main = nn.Sequential(*layers)
+class DropPath(nn.Module):
+    """
+    Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
+    """
+    def __init__(self, drop_prob: float = 0., scale_by_keep: bool = True):
+        super(DropPath, self).__init__()
+        self.drop_prob = drop_prob
+        self.scale_by_keep = scale_by_keep
 
     def forward(self, x):
-        return self.main(x)
+        return drop_path(x, self.drop_prob, self.training, self.scale_by_keep)
 
+    def extra_repr(self):
+        return f'drop_prob={round(self.drop_prob,3):0.3f}'
 
-class BCNet(nn.Module):
-    """Simple class for non-linear bilinear connect network
-    Modified from https://github.com/jnhwkim/ban-vqa/blob/master/bc.py
-    """
+class BiMultiHeadAttention(nn.Module):
+    def __init__(self, v_dim, l_dim, embed_dim, num_heads, dropout=0.1, cfg=None):
+        super(BiMultiHeadAttention, self).__init__()
 
-    def __init__(self, v_dim, q_dim, h_dim, h_out, act='ReLU', dropout=[.2, .5], k=3):
-        super(BCNet, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.v_dim = v_dim
+        self.l_dim = l_dim
 
-        self.c = 32
-        self.k = k
-        self.v_dim = v_dim;
-        self.q_dim = q_dim
-        self.h_dim = h_dim;
-        self.h_out = h_out
+        assert (
+            self.head_dim * self.num_heads == self.embed_dim
+        ), f"embed_dim must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`: {self.num_heads})."
+        self.scale = self.head_dim ** (-0.5)
+        self.dropout = dropout
 
-        self.v_net = FCNet([v_dim, h_dim * self.k], act=act, dropout=dropout[0])
-        self.q_net = FCNet([q_dim, h_dim * self.k], act=act, dropout=dropout[0])
-        self.dropout = nn.Dropout(dropout[1])  # attention
-        if 1 < k:
-            self.p_net = nn.AvgPool1d(self.k, stride=self.k)
+        self.v_proj = nn.Linear(self.v_dim, self.embed_dim)
+        self.l_proj = nn.Linear(self.l_dim, self.embed_dim)
+        self.values_v_proj = nn.Linear(self.v_dim, self.embed_dim)
+        self.values_l_proj = nn.Linear(self.l_dim, self.embed_dim)
 
-        if None == h_out:
-            pass
-        elif h_out <= self.c:
-            self.h_mat = nn.Parameter(torch.Tensor(1, h_out, 1, h_dim * self.k).normal_())
-            self.h_bias = nn.Parameter(torch.Tensor(1, h_out, 1, 1).normal_())
-        else:
-            self.h_net = weight_norm(nn.Linear(h_dim * self.k, h_out), dim=None)
+        self.out_v_proj = nn.Linear(self.embed_dim, self.v_dim)
+        self.out_l_proj = nn.Linear(self.embed_dim, self.l_dim)
 
-    def forward(self, v, q):
-        if None == self.h_out:
-            v_ = self.v_net(v)
-            q_ = self.q_net(q)
-            logits = torch.einsum('bvk,bqk->bvqk', (v_, q_))
-            return logits
+        self.stable_softmax_2d = True
+        self.clamp_min_for_underflow = True
+        self.clamp_max_for_overflow = True
 
-        # low-rank bilinear pooling using einsum
-        elif self.h_out <= self.c:
-            v_ = self.dropout(self.v_net(v))
-            q_ = self.q_net(q)
-            logits = torch.einsum('xhyk,bvk,bqk->bhvq', (self.h_mat, v_, q_)) + self.h_bias
-            return logits  # b x h_out x v x q
+        self._reset_parameters()
 
-        # batch outer product, linear projection
-        # memory efficient but slow computation
-        else:
-            v_ = self.dropout(self.v_net(v)).transpose(1, 2).unsqueeze(3)
-            q_ = self.q_net(q).transpose(1, 2).unsqueeze(2)
-            d_ = torch.matmul(v_, q_)  # b x h_dim x v x q
-            logits = self.h_net(d_.transpose(1, 2).transpose(2, 3))  # b x v x q x h_out
-            return logits.transpose(2, 3).transpose(1, 2)  # b x h_out x v x q
+    def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
+        return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
 
-    def forward_with_weights(self, v, q, w):
-        v_ = self.v_net(v)  # b x v x d
-        q_ = self.q_net(q)  # b x q x d
-        logits = torch.einsum('bvk,bvq,bqk->bk', (v_, w, q_))
-        if 1 < self.k:
-            logits = logits.unsqueeze(1)  # b x 1 x d
-            logits = self.p_net(logits).squeeze(1) * self.k  # sum-pooling
-        return logits
+    def _reset_parameters(self):
+        nn.init.xavier_uniform_(self.v_proj.weight)
+        self.v_proj.bias.data.fill_(0)
+        nn.init.xavier_uniform_(self.l_proj.weight)
+        self.l_proj.bias.data.fill_(0)
+        nn.init.xavier_uniform_(self.values_v_proj.weight)
+        self.values_v_proj.bias.data.fill_(0)
+        nn.init.xavier_uniform_(self.values_l_proj.weight)
+        self.values_l_proj.bias.data.fill_(0)
+        nn.init.xavier_uniform_(self.out_v_proj.weight)
+        self.out_v_proj.bias.data.fill_(0)
+        nn.init.xavier_uniform_(self.out_l_proj.weight)
+        self.out_l_proj.bias.data.fill_(0)
+
+    def forward(self, v, l, attention_mask_v=None, attention_mask_l=None):
+        """_summary_
+
+        Args:
+            v (_type_): bs, n_img, dim
+            l (_type_): bs, n_text, dim
+            attention_mask_v (_type_, optional): _description_. bs, n_img
+            attention_mask_l (_type_, optional): _description_. bs, n_text
+
+        Returns:
+            _type_: _description_
+        """
+        # if os.environ.get('IPDB_SHILONG_DEBUG', None) == 'INFO':
+        #     import ipdb; ipdb.set_trace()
+        bsz, tgt_len, _ = v.size()
+
+        query_states = self.v_proj(v) * self.scale
+        key_states = self._shape(self.l_proj(l), -1, bsz)
+        value_v_states = self._shape(self.values_v_proj(v), -1, bsz)
+        value_l_states = self._shape(self.values_l_proj(l), -1, bsz)
+
+        proj_shape = (bsz * self.num_heads, -1, self.head_dim)
+        query_states = self._shape(query_states, tgt_len, bsz).view(*proj_shape)
+        key_states = key_states.view(*proj_shape)
+        value_v_states = value_v_states.view(*proj_shape)
+        value_l_states = value_l_states.view(*proj_shape)
+
+        src_len = key_states.size(1)
+        attn_weights = torch.bmm(query_states, key_states.transpose(1, 2))  # bs*nhead, nimg, ntxt
+
+        if attn_weights.size() != (bsz * self.num_heads, tgt_len, src_len):
+            raise ValueError(
+                f"Attention weights should be of size {(bsz * self.num_heads, tgt_len, src_len)}, but is {attn_weights.size()}"
+            )
+
+        if self.stable_softmax_2d:
+            attn_weights = attn_weights - attn_weights.max()
+
+        if self.clamp_min_for_underflow:
+            attn_weights = torch.clamp(
+                attn_weights, min=-50000
+            )  # Do not increase -50000, data type half has quite limited range
+        if self.clamp_max_for_overflow:
+            attn_weights = torch.clamp(
+                attn_weights, max=50000
+            )  # Do not increase 50000, data type half has quite limited range
+
+        attn_weights_T = attn_weights.transpose(1, 2)
+        attn_weights_l = attn_weights_T - torch.max(attn_weights_T, dim=-1, keepdim=True)[0]
+        if self.clamp_min_for_underflow:
+            attn_weights_l = torch.clamp(
+                attn_weights_l, min=-50000
+            )  # Do not increase -50000, data type half has quite limited range
+        if self.clamp_max_for_overflow:
+            attn_weights_l = torch.clamp(
+                attn_weights_l, max=50000
+            )  # Do not increase 50000, data type half has quite limited range
+
+        # mask vison for language
+        if attention_mask_v is not None:
+            attention_mask_v = (
+                attention_mask_v[:, None, None, :].repeat(1, self.num_heads, 1, 1).flatten(0, 1)
+            )
+            attn_weights_l.masked_fill_(attention_mask_v, float("-inf"))
+
+        attn_weights_l = attn_weights_l.softmax(dim=-1)
+
+        # mask language for vision
+        if attention_mask_l is not None:
+            attention_mask_l = (
+                attention_mask_l[:, None, None, :].repeat(1, self.num_heads, 1, 1).flatten(0, 1)
+            )
+            attn_weights.masked_fill_(attention_mask_l, float("-inf"))
+        attn_weights_v = attn_weights.softmax(dim=-1)
+
+        attn_probs_v = F.dropout(attn_weights_v, p=self.dropout, training=self.training)
+        attn_probs_l = F.dropout(attn_weights_l, p=self.dropout, training=self.training)
+
+        attn_output_v = torch.bmm(attn_probs_v, value_l_states)
+        attn_output_l = torch.bmm(attn_probs_l, value_v_states)
+
+        if attn_output_v.size() != (bsz * self.num_heads, tgt_len, self.head_dim):
+            raise ValueError(
+                f"`attn_output_v` should be of size {(bsz, self.num_heads, tgt_len, self.head_dim)}, but is {attn_output_v.size()}"
+            )
+
+        if attn_output_l.size() != (bsz * self.num_heads, src_len, self.head_dim):
+            raise ValueError(
+                f"`attn_output_l` should be of size {(bsz, self.num_heads, src_len, self.head_dim)}, but is {attn_output_l.size()}"
+            )
+
+        attn_output_v = attn_output_v.view(bsz, self.num_heads, tgt_len, self.head_dim)
+        attn_output_v = attn_output_v.transpose(1, 2)
+        attn_output_v = attn_output_v.reshape(bsz, tgt_len, self.embed_dim)
+
+        attn_output_l = attn_output_l.view(bsz, self.num_heads, src_len, self.head_dim)
+        attn_output_l = attn_output_l.transpose(1, 2)
+        attn_output_l = attn_output_l.reshape(bsz, src_len, self.embed_dim)
+
+        attn_output_v = self.out_v_proj(attn_output_v)
+        attn_output_l = self.out_l_proj(attn_output_l)
+
+        return attn_output_v, attn_output_l
+
+# Bi-Direction MHA (text->image, image->text)
+class BiAttentionBlock(nn.Module):
+    def __init__(
+        self,
+        v_dim,
+        l_dim,
+        embed_dim,
+        num_heads,
+        dropout=0.1,
+        drop_path=0.0,
+        init_values=1e-4,
+        cfg=None,
+    ):
+        """
+        Inputs:
+            embed_dim - Dimensionality of input and attention feature vectors
+            num_heads - Number of heads to use in the Multi-Head Attention block
+            dropout - Amount of dropout to apply in the feed-forward network
+        """
+        super(BiAttentionBlock, self).__init__()
+
+        # pre layer norm
+        self.layer_norm_v = nn.LayerNorm(v_dim)
+        self.layer_norm_l = nn.LayerNorm(l_dim)
+        self.attn = BiMultiHeadAttention(
+            v_dim=v_dim, l_dim=l_dim, embed_dim=embed_dim, num_heads=num_heads, dropout=dropout
+        )
+
+        # add layer scale for training stability
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.gamma_v = nn.Parameter(init_values * torch.ones((v_dim)), requires_grad=True)
+        self.gamma_l = nn.Parameter(init_values * torch.ones((l_dim)), requires_grad=True)
+
+    def forward(self, v, l, attention_mask_v=None, attention_mask_l=None):
+        v = self.layer_norm_v(v)
+        l = self.layer_norm_l(l)
+        delta_v, delta_l = self.attn(
+            v, l, attention_mask_v=attention_mask_v, attention_mask_l=attention_mask_l
+        )
+        # v, l = v + delta_v, l + delta_l
+        v = v + self.drop_path(self.gamma_v * delta_v)
+        l = l + self.drop_path(self.gamma_l * delta_l)
+        return v, l
 
 
 class Projector(nn.Module):
@@ -227,28 +310,71 @@ class Classifier(nn.Module):
         x = self.fc4(x)
         return x
 
+class Generator(nn.Module):
+    def __init__(self, gen, layernorm, dropout, gen_fc):
+        super().__init__()
+        self.gen = gen
+        self.layernorm = layernorm
+        self.dropout = dropout
+        self.gen_fc = gen_fc
+    
+    def forward(self, x, mask):
+        gen_output = self.gen(x, src_key_padding_mask=~mask.bool())
+        layer_output = self.layernorm(gen_output)
+        drop_output = self.dropout(layer_output)
+        res = self.gen_fc(drop_output)
+        return res
 
+
+class DrugEmbedding(nn.Module):
+    def __init__(self, drug_pretrained_dim = 768, prot_pretrained_dim = 1024, embedding_dim = 512, num_heads = 4):
+        super().__init__()
+        """Constructor for the model."""
+        
+        self.drug_project = Projector(
+            input_dim = drug_pretrained_dim,
+            out_dim = embedding_dim,
+            activation_fn = 'relu'
+        )
+
+        self.prot_project = Projector(
+            input_dim = prot_pretrained_dim,
+            out_dim = embedding_dim,
+            activation_fn = 'relu'
+        )
+
+        self.bi_attention = BiAttentionBlock(
+            v_dim=embedding_dim,
+            l_dim=embedding_dim,
+            embed_dim=embedding_dim,
+            num_heads=num_heads,
+        )
+    
+    def forward(self, inputs, masks):
+        drug_embed, prot_embed, drug_mask, prot_mask = inputs[0], inputs[1], masks[0], masks[1]
+        
+        drug_embed = self.drug_project(drug_embed)
+        prot_embed = self.prot_project(prot_embed)
+
+        
+        drug_embed, prot_embed = self.bi_attention(drug_embed, prot_embed, ~drug_mask.bool(), ~prot_mask.bool())
+        
+        # print(torch.any(torch.isnan(drug_embed)).item(), torch.any(torch.isnan(prot_embed)).item())
+        # print("-" * 20)
+
+        embedding = torch.cat([drug_embed, prot_embed], dim=1)
+        mask = torch.cat([drug_mask, prot_mask], dim=1)
+
+        return embedding, mask
 
 class DrugRMCD(nn.Module):
     def __init__(self, args):
         super(DrugRMCD, self).__init__()
         self.args = args
-        self.drug_embedding_layer = Projector(input_dim=768,
-                                            out_dim=args.embedding_dim, 
-                                            activation_fn='relu')
-        self.prot_embedding_layer = Projector(input_dim=1024, 
-                                            out_dim=args.embedding_dim,
-                                            activation_fn='relu')
-        
-        self.drug_generator = self._init_generator(args)
-        self.prot_generator = self._init_generator(args)
+        self.embedding_layer = DrugEmbedding(embedding_dim=args.embedding_dim, num_heads=args.num_heads)
 
-        self.drug_encoder = self._init_encoder(args)
-        self.prot_encoder = self._init_encoder(args)
-
-        self.bi_attention = weight_norm(
-            BANLayer(v_dim=args.embedding_dim, q_dim=args.embedding_dim, h_dim=args.mlp_in_dim, h_out=args.ban_heads), 
-            name='h_mat', dim=None)
+        self.generator = self._init_generator(args)
+        self.encoder = self._init_encoder(args)
 
         self.cls_fc = Classifier(in_dim=args.mlp_in_dim, hidden_dim=args.mlp_hidden_dim, out_dim=args.mlp_in_dim, binary=args.num_class)
         
@@ -267,7 +393,7 @@ class DrugRMCD(nn.Module):
         layernorm = nn.LayerNorm(args.embedding_dim)
         dropout = nn.Dropout(args.dropout)
         gen_fc = nn.Linear(args.embedding_dim, 2)
-        generator = nn.Sequential(gen,
+        generator = Generator(gen,
                             layernorm,
                             dropout,
                             gen_fc)
@@ -298,70 +424,64 @@ class DrugRMCD(nn.Module):
         return z
 
     def forward(self, inputs, masks):
-        drug_embedding = self.drug_embedding_layer(inputs[0])
-        prot_embedding = self.prot_embedding_layer(inputs[1])
+        embedding, masks = self.embedding_layer(inputs, masks)
 
-        drug_masks = masks[0]
-        prot_masks = masks[1]
-
+        masks_ = masks.unsqueeze(-1)
         ########## Genetator ##########
-        drug_gen_logits=self.drug_generator(drug_embedding, src_key_padding_mask=drug_masks.bool()) # (batch_size, seq_length, 2)
-        prot_gen_logits=self.prot_generator(prot_embedding, src_key_padding_mask=prot_masks.bool()) # (batch_size, seq_length, 2)
+        embedding = embedding * masks_
+        gen_logits=self.generator(embedding, masks.bool()) # (batch_size, seq_length, 2)
         ########## Sample ##########
-        drug_z = self.independent_straight_through_sampling(drug_gen_logits)  # (batch_size, seq_length, 2)
-        prot_z = self.independent_straight_through_sampling(prot_gen_logits)  # (batch_size, seq_length, 2)
+        z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
         ########## Classifier ##########
-        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=drug_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=prot_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
+        embedding = embedding * z[:, :, 1].unsqueeze(-1)
+        cls_outputs = self.encoder(embedding, src_key_padding_mask=~z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
+        cls_outputs = cls_outputs * masks_ + (1. - masks_) * (-1e6)
 
-        fusion_output, _ = self.bi_attention(drug_enc_output, prot_enc_output) # (batch_size, hidden_dim)
+        cls_outputs = torch.transpose(cls_outputs, 1, 2)
+        cls_outputs, _ = torch.max(cls_outputs, axis=2)
         # shape -- (batch_size, num_classes)
-        cls_logits = self.cls_fc(fusion_output)
-        return drug_z, prot_z, cls_logits
+        cls_logits = self.cls_fc(cls_outputs)
+        # shape -- (batch_size, num_classes)
+        return z, cls_logits
 
     def train_one_step(self, inputs, masks):    #input x directly to predictor
-        drug_embedding = self.drug_embedding_layer(inputs[0])
-        prot_embedding = self.prot_embedding_layer(inputs[1])
+        embedding, masks = self.embedding_layer(inputs, masks)
+        masks_ = masks.unsqueeze(-1)
 
-        drug_masks= masks[0]
-        prot_masks = masks[1]
+        embedding = embedding * masks_
+        cls_outputs = self.encoder(embedding, src_key_padding_mask=~masks.bool())  # (batch_size, seq_length, hidden_dim)
+        cls_outputs = cls_outputs * masks_ + (1. - masks_) * (-1e6)
 
-        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=drug_masks.bool())  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=prot_masks.bool())  # (batch_size, seq_length, hidden_dim)
-
-        fusion_output, _ = self.bi_attention(drug_enc_output, prot_enc_output) # (batch_size, hidden_dim)
+        cls_outputs = torch.transpose(cls_outputs, 1, 2)
+        cls_outputs, _ = torch.max(cls_outputs, axis=2)
         # shape -- (batch_size, num_classes)
-        cls_logits = self.cls_fc(fusion_output)
+        cls_logits = self.cls_fc(cls_outputs)
         return cls_logits
 
 
-    def get_rationale(self, inputs, masks, type=None):
+    def get_rationale(self, inputs, masks):
         ########## Genetator ##########
-        if type == 'drug':
-            embedding = self.drug_embedding_layer(inputs[0])  # (batch_size, seq_length, embedding_dim)
-            mask = masks[0]
-            gen_logits = self.drug_generator(embedding, src_key_padding_mask=mask.bool()) # (batch_size, seq_length, 2)    
-        elif type == 'prot':
-            embedding = self.prot_embedding_layer(inputs[1])  # (batch_size, seq_length, embedding_dim)
-            mask = masks[1]
-            gen_logits = self.prot_generator(embedding, src_key_padding_mask=mask.bool())  # (batch_size, seq_length, 2)
-        else:
-            raise NotImplementedError('type {} is not implemented'.format(type))
+        embedding, masks = self.embedding_layer(inputs, masks)  # (batch_size, seq_length, embedding_dim)
+        mask_ = masks.unsqueeze(-1)
+        embedding = embedding * mask_
+        gen_logits = self.generator(embedding, masks.bool()) # (batch_size, seq_length, 2)    
         ########## Sample ##########
         z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
 
-        return z         
+        return z, masks
     
-    def pred_forward_logit(self, inputs, drug_z, prot_z):
-        drug_embedding = self.drug_embedding_layer(inputs[0]) # (batch_size, seq_length, embedding_dim)
-        prot_embedding = self.prot_embedding_layer(inputs[1]) # (batch_size, seq_length, embedding_dim)
-
+    def pred_forward_logit(self, inputs, masks, z):
+        embedding, masks = self.embedding_layer(inputs, masks) # (batch_size, seq_length, embedding_dim)
+        masks_ = masks.unsqueeze(-1)
         ########## Classifier ##########
-        drug_enc_output = self.drug_encoder(drug_embedding, src_key_padding_mask=drug_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
-        prot_enc_output = self.prot_encoder(prot_embedding, src_key_padding_mask=prot_z[:, :, 1].bool())  # (batch_size, seq_length, hidden_dim)
-        fusion_output, _ = self.bi_attention(drug_enc_output, prot_enc_output) # (batch_size, hidden_dim)
+        embedding = embedding * masks_
+        cls_outputs = self.encoder(embedding, src_key_padding_mask=~z[:,:,1].bool())  # (batch_size, seq_length, hidden_dim)
+        cls_outputs = cls_outputs * masks_ + (1. - masks_) * (-1e6)
+
+        cls_outputs = torch.transpose(cls_outputs, 1, 2)
+        cls_outputs, _ = torch.max(cls_outputs, axis=2)
         # shape -- (batch_size, num_classes)
-        cls_logits = self.cls_fc(fusion_output)
+        cls_logits = self.cls_fc(cls_outputs)
         return cls_logits
 
 
