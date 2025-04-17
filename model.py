@@ -292,23 +292,23 @@ def get_activation_fn(activation):
         raise RuntimeError("--activation-fn {} not supported".format(activation))
 
 
-class Classifier(nn.Module):
-    def __init__(self, in_dim, hidden_dim, out_dim, binary=1):
-        super(Classifier, self).__init__()
-        self.fc1 = nn.Linear(in_dim, hidden_dim)
-        self.bn1 = nn.BatchNorm1d(hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.bn2 = nn.BatchNorm1d(hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, out_dim)
-        self.bn3 = nn.BatchNorm1d(out_dim)
-        self.fc4 = nn.Linear(out_dim, binary)
+# class Classifier(nn.Module):
+#     def __init__(self, in_dim, hidden_dim, out_dim, binary=1):
+#         super(Classifier, self).__init__()
+#         self.fc1 = nn.Linear(in_dim, hidden_dim)
+#         self.bn1 = nn.BatchNorm1d(hidden_dim)
+#         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+#         self.bn2 = nn.BatchNorm1d(hidden_dim)
+#         self.fc3 = nn.Linear(hidden_dim, out_dim)
+#         self.bn3 = nn.BatchNorm1d(out_dim)
+#         self.fc4 = nn.Linear(out_dim, binary)
 
-    def forward(self, x):
-        x = self.bn1(F.relu(self.fc1(x)))
-        x = self.bn2(F.relu(self.fc2(x)))
-        x = self.bn3(F.relu(self.fc3(x)))
-        x = self.fc4(x)
-        return x
+#     def forward(self, x):
+#         x = self.bn1(F.relu(self.fc1(x)))
+#         x = self.bn2(F.relu(self.fc2(x)))
+#         x = self.bn3(F.relu(self.fc3(x)))
+#         x = self.fc4(x)
+#         return x
 
 class Generator(nn.Module):
     def __init__(self, gen, layernorm, dropout, gen_fc):
@@ -356,7 +356,6 @@ class DrugEmbedding(nn.Module):
         drug_embed = self.drug_project(drug_embed)
         prot_embed = self.prot_project(prot_embed)
 
-        
         drug_embed, prot_embed = self.bi_attention(drug_embed, prot_embed, ~drug_mask.bool(), ~prot_mask.bool())
         
         # print(torch.any(torch.isnan(drug_embed)).item(), torch.any(torch.isnan(prot_embed)).item())
@@ -376,7 +375,10 @@ class DrugRMCD(nn.Module):
         self.generator = self._init_generator(args)
         self.encoder = self._init_encoder(args)
 
-        self.cls_fc = Classifier(in_dim=args.mlp_in_dim, hidden_dim=args.mlp_hidden_dim, out_dim=args.mlp_in_dim, binary=args.num_class)
+        self.cls_fc = nn.Sequential(
+            nn.Dropout(args.dropout),
+            nn.Linear(args.embedding_dim, args.num_class)
+        )
         
     def _init_generator(self, args):
         """

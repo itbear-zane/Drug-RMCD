@@ -12,7 +12,7 @@ from metric import get_sparsity_loss, get_continuity_loss, binary_cross_entropy,
 from utils import save_checkpoint, load_latest_checkpoint
 
 
-def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
+def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, epoch, args):
     cls_l = 0
     spar_l = 0
     cont_l = 0
@@ -23,6 +23,7 @@ def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
     for (_, (inputs, masks, labels)) in enumerate(tqdm(dataset, desc=f'Training epoch {epoch}')):
         opt_gen.zero_grad()
         opt_pred.zero_grad()
+        opt_embedding.zero_grad()
         inputs, org_masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.type(torch.float).to(device)
 
         #train classification
@@ -49,6 +50,8 @@ def train_one_epoch(model, opt_gen, opt_pred, dataset, device, epoch, args):
         opt_pred.zero_grad()
         opt_gen.step()
         opt_gen.zero_grad()
+        opt_embedding.step()
+        opt_embedding.zero_grad()
 
         # train rationale with sparsity, continuity, js-div
         opt_gen.zero_grad()
@@ -169,7 +172,7 @@ def evaluate(model, dataloader, device, mode=None):
             return auroc, auprc, test_loss_epoch
         
 
-def train(model, optimizer_gen, optimizer_pred, train_loader, val_loader, logger, args):
+def train(model, optimizer_gen, optimizer_pred, optimizer_embedding, train_loader, val_loader, logger, args):
     # Resume training
     start_epoch = 0
     if args.resume:
@@ -185,7 +188,7 @@ def train(model, optimizer_gen, optimizer_pred, train_loader, val_loader, logger
     for epoch in range(start_epoch, args.epochs):
         # Train
         model.train()
-        class_loss_epoch, gen_loss_epoch = train_one_epoch(model, optimizer_gen, optimizer_pred, train_loader, args.device, epoch, args)
+        class_loss_epoch, gen_loss_epoch = train_one_epoch(model, optimizer_gen, optimizer_pred, optimizer_embedding, train_loader, args.device, epoch, args)
         logger.info(f"Epoch {epoch + 1}/{args.epochs} - Class Loss: {class_loss_epoch:.4f}, Gen Loss: {gen_loss_epoch:.4f}")
 
         # Evaluate

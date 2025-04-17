@@ -20,11 +20,10 @@ def parse():
     parser.add_argument('--num_workers', type=int, default=5, help='Num workers [default: 5]')
 
     # model parameters
-    parser.add_argument('--num_layers', type=int, default=3, help='Num layers of TransformerEncoder Layer')
-    parser.add_argument('--embedding_dim', type=int, default=128, help='Embedding dims [default: 128]')
-    parser.add_argument('--dim_feedforward', type=int, default=512, help='Dim of feedforward layer')
-    parser.add_argument('--num_heads', type=int, default=4, help='Num attention heads of transformer layer')
-    parser.add_argument('--ban_heads', type=int, default=2, help='Num attention heads of BAN layer')
+    parser.add_argument('--num_layers', type=int, default=1, help='Num layers of TransformerEncoder Layer')
+    parser.add_argument('--embedding_dim', type=int, default=512, help='Embedding dims [default: 128]')
+    parser.add_argument('--dim_feedforward', type=int, default=2048, help='Dim of feedforward layer')
+    parser.add_argument('--num_heads', type=int, default=8, help='Num attention heads of transformer layer')
     parser.add_argument('--mlp_in_dim', type=int, default=128, help='MLP input dims [default: 128]')
     parser.add_argument('--mlp_hidden_dim', type=int, default=512, help='MLP hidden dims [default: 512]')
     parser.add_argument('--mlp_out_dim', type=int, default=128, help='MLP output dims [default: 128]')
@@ -38,6 +37,7 @@ def parse():
     parser.add_argument("--patience", type=int, default=5, help="Patience for early stopping")
     parser.add_argument('--lr1', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
     parser.add_argument('--lr2', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
+    parser.add_argument('--lr3', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
     parser.add_argument('--sparsity_lambda', type=float, default=6., help='Sparsity trade-off [default: 1.]')
     parser.add_argument('--continuity_lambda', type=float, default=6., help='Continuity trade-off [default: 4.]')
     parser.add_argument('--sparsity_percentage', type=float, default=0.1, help='Sparsity percentage [default: .2]')
@@ -76,6 +76,11 @@ model.to(args.device)
 
 
 # Set up optimizer
+# Embedding
+e_para=[]
+for p in model.embedding_layer.parameters():
+    if p.requires_grad==True:
+        e_para.append(p)
 # Generator
 g_para=[]
 for p in model.generator.parameters():
@@ -84,9 +89,6 @@ for p in model.generator.parameters():
 
 # Predictor
 p_para=[]
-for p in model.embedding_layer.parameters():
-    if p.requires_grad==True:
-        p_para.append(p)
 for p in model.encoder.parameters():
     if p.requires_grad==True:
         p_para.append(p)
@@ -97,15 +99,16 @@ for p in model.cls_fc.parameters():
 # g_para=filter(lambda p: p.requires_grad==True, model.generator.parameters())
 para_gen=[{'params': g_para, 'lr':args.lr1}]
 para_pred=[{'params': p_para,'lr':args.lr2}]
+para_embedding=[{'params': e_para,'lr':args.lr3}]
 
 optimizer_gen = torch.optim.Adam(para_gen)
 optimizer_pred = torch.optim.Adam(para_pred)
-
+optimizer_embedding = torch.optim.Adam(para_embedding)
 
 ######################
 # Training
 ######################
-train(model, optimizer_gen, optimizer_pred, train_loader, val_loader, logger, args)
+train(model, optimizer_gen, optimizer_pred, optimizer_embedding, train_loader, val_loader, logger, args)
 
 ######################
 # Testing
