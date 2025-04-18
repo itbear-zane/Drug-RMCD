@@ -292,23 +292,23 @@ def get_activation_fn(activation):
         raise RuntimeError("--activation-fn {} not supported".format(activation))
 
 
-# class Classifier(nn.Module):
-#     def __init__(self, in_dim, hidden_dim, out_dim, binary=1):
-#         super(Classifier, self).__init__()
-#         self.fc1 = nn.Linear(in_dim, hidden_dim)
-#         self.bn1 = nn.BatchNorm1d(hidden_dim)
-#         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-#         self.bn2 = nn.BatchNorm1d(hidden_dim)
-#         self.fc3 = nn.Linear(hidden_dim, out_dim)
-#         self.bn3 = nn.BatchNorm1d(out_dim)
-#         self.fc4 = nn.Linear(out_dim, binary)
+class Classifier(nn.Module):
+    def __init__(self, in_dim, hidden_dim, out_dim, binary=2):
+        super(Classifier, self).__init__()
+        self.fc1 = nn.Linear(in_dim, hidden_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.bn2 = nn.BatchNorm1d(hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, out_dim)
+        self.bn3 = nn.BatchNorm1d(out_dim)
+        self.fc4 = nn.Linear(out_dim, binary)
 
-#     def forward(self, x):
-#         x = self.bn1(F.relu(self.fc1(x)))
-#         x = self.bn2(F.relu(self.fc2(x)))
-#         x = self.bn3(F.relu(self.fc3(x)))
-#         x = self.fc4(x)
-#         return x
+    def forward(self, x):
+        x = self.bn1(F.relu(self.fc1(x)))
+        x = self.bn2(F.relu(self.fc2(x)))
+        x = self.bn3(F.relu(self.fc3(x)))
+        x = self.fc4(x)
+        return x
 
 
 class DrugEmbedding(nn.Module):
@@ -346,7 +346,10 @@ class DrugEmbedding(nn.Module):
         # print(torch.any(torch.isnan(drug_embed)).item(), torch.any(torch.isnan(prot_embed)).item())
         # print("-" * 20)
 
-        return drug_embed, prot_embed, drug_mask, prot_mask
+        embeddings = torch.cat([drug_embed, prot_embed], dim=1)
+        masks = torch.cat([drug_mask, prot_mask], dim=1)
+
+        return embeddings, masks
 
 class DrugRMCD(nn.Module):
     def __init__(self, args):
@@ -354,16 +357,10 @@ class DrugRMCD(nn.Module):
         self.args = args
         self.embedding_layer = DrugEmbedding(embedding_dim=args.embedding_dim, num_heads=args.num_heads)
 
-        self.drug_generator = self._init_generator(args)
-        self.prot_generator = self._init_generator(args)
+        self.generator = self._init_generator(args)
+        self.encoder = self._init_encoder(args)
 
-        self.drug_encoder = self._init_encoder(args)
-        self.prot_encoder = self._init_encoder(args)
-
-        self.cls_fc = nn.Sequential(
-            nn.Dropout(args.dropout),
-            nn.Linear(args.embedding_dim, args.num_class)
-        )
+        self.cls_fc = Classifier(args.mlp_in_dim, args.mlp_hidden_dim, args.mlp_out_dim, binary=args.num_class)
         
     def _init_generator(self, args):
         """
@@ -419,48 +416,37 @@ class DrugRMCD(nn.Module):
         return z
 
     def forward(self, inputs, masks):
-        drug_embedding, prot_embedding, drug_masks, prot_masks = self.embedding_layer(inputs, masks)
+        embeddings, masks = self.embedding_layer(inputs, masks)
 
-        drug_masks_ = drug_masks.unsqueeze(-1)
-        prot_masks_ = prot_masks.unsqueeze(-1)
+        masks_ = masks.unsqueeze(-1)
         ########## Genetator ##########
-        drug_embedding = drug_embedding * drug_masks_
-        prot_embedding = prot_embedding * prot_masks_
-        drug_gen_logits = self.drug_generator(drug_embedding) # (batch_size, seq_length, 2)
-        prot_gen_logits = self.prot_generator(prot_embedding) # (batch_size, seq_length, 2)
+        embeddings = embeddings * masks_
+        gen_logits = self.generator(embeddings) # (batch_size, seq_length, 2)
         ########## Sample ##########
-        drug_z = self.independent_straight_through_sampling(drug_gen_logits)  # (batch_size, seq_length, 2)
-        prot_z = self.independent_straight_through_sampling(prot_gen_logits)  # (batch_size, seq_length, 2)
+        z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
         ########## Classifier ##########
-        drug_embedding = drug_embedding * drug_z[:, :, 1].unsqueeze(-1)
-        prot_embedding = prot_embedding * prot_z[:, :, 1].unsqueeze(-1)
-        drug_enc_outputs = self.drug_encoder(drug_embedding)  # (batch_size, seq_length, hidden_dim)
-        drug_enc_outputs = drug_enc_outputs * drug_masks_ + (1. - drug_masks_) * (-1e6)
-        prot_enc_outputs = self.prot_encoder(prot_embedding)  # (batch_size, seq_length, hidden_dim)
-        prot_enc_outputs = prot_enc_outputs * prot_masks_ + (1. - prot_masks_) * (-1e6)
+        embeddings = embeddings * z[:, :, 1].unsqueeze(-1)
+        enc_outputs = self.encoder(embeddings)  # (batch_size, seq_length, hidden_dim)
+        enc_outputs = enc_outputs * masks_ + (1. - masks_) * (-1e6)
 
-        cls_outputs = self._get_combine_output(drug_enc_outputs, prot_enc_outputs)
+        enc_outputs = torch.transpose(enc_outputs, 1, 2)
+        cls_outputs, _ = torch.max(enc_outputs, axis=2)
         # shape -- (batch_size, num_classes)
         cls_logits = self.cls_fc(cls_outputs)
         # shape -- (batch_size, num_classes)
-        return drug_z, prot_z, cls_logits
+        return z, cls_logits
 
     def train_one_step(self, inputs, masks):    #input x directly to predictor
-        drug_embedding, prot_embedding, drug_masks, prot_masks = self.embedding_layer(inputs, masks)
-        
-        drug_masks_ = drug_masks.unsqueeze(-1)
-        prot_masks_ = prot_masks.unsqueeze(-1)
+        embeddings, masks = self.embedding_layer(inputs, masks)
 
-        drug_embedding = drug_embedding * drug_masks_
-        prot_embedding = prot_embedding * prot_masks_
-
+        masks_ = masks.unsqueeze(-1)
         ########## Classifier ##########
-        drug_enc_outputs = self.drug_encoder(drug_embedding)  # (batch_size, seq_length, hidden_dim)
-        drug_enc_outputs = drug_enc_outputs * drug_masks_ + (1. - drug_masks_) * (-1e6)
-        prot_enc_outputs = self.prot_encoder(prot_embedding)  # (batch_size, seq_length, hidden_dim)
-        prot_enc_outputs = prot_enc_outputs * prot_masks_ + (1. - prot_masks_) * (-1e6)
+        embeddings = embeddings * masks_
+        enc_outputs = self.encoder(embeddings)  # (batch_size, seq_length, hidden_dim)
+        enc_outputs = enc_outputs * masks_ + (1. - masks_) * (-1e6)
 
-        cls_outputs = self._get_combine_output(drug_enc_outputs, prot_enc_outputs)
+        enc_outputs = torch.transpose(enc_outputs, 1, 2)
+        cls_outputs, _ = torch.max(enc_outputs, axis=2)
         # shape -- (batch_size, num_classes)
         cls_logits = self.cls_fc(cls_outputs)
         # shape -- (batch_size, num_classes)
@@ -469,37 +455,30 @@ class DrugRMCD(nn.Module):
 
     def get_rationale(self, inputs, masks):
         ########## Genetator ##########
-        drug_embedding, prot_embedding, drug_masks, prot_masks = self.embedding_layer(inputs, masks)
+        embeddings, masks = self.embedding_layer(inputs, masks)
 
-        drug_masks_ = drug_masks.unsqueeze(-1)
-        prot_masks_ = prot_masks.unsqueeze(-1)  
+        masks_ = masks.unsqueeze(-1)
         ########## Genetator ##########
-        drug_embedding = drug_embedding * drug_masks_
-        prot_embedding = prot_embedding * prot_masks_
-        drug_gen_logits = self.drug_generator(drug_embedding) # (batch_size, seq_length, 2)
-        prot_gen_logits = self.prot_generator(prot_embedding) # (batch_size, seq_length, 2)  
+        embeddings = embeddings * masks_
+        gen_logits = self.generator(embeddings) # (batch_size, seq_length, 2)
         ########## Sample ##########
-        drug_z = self.independent_straight_through_sampling(drug_gen_logits)  # (batch_size, seq_length, 2)
-        prot_z = self.independent_straight_through_sampling(prot_gen_logits)  # (batch_size, seq_length, 2)
+        z = self.independent_straight_through_sampling(gen_logits)  # (batch_size, seq_length, 2)
 
-        return drug_z, prot_z, drug_masks, prot_masks
+        return z, masks
     
-    def pred_forward_logit(self, inputs, masks, drug_z, prot_z):
-        drug_embedding, prot_embedding, drug_masks, prot_masks = self.embedding_layer(inputs, masks)
+    def pred_forward_logit(self, inputs, masks, z):
+        embeddings, masks = self.embedding_layer(inputs, masks)
 
-        drug_masks_ = drug_masks.unsqueeze(-1)
-        prot_masks_ = prot_masks.unsqueeze(-1)
+        masks_ = masks.unsqueeze(-1)
         ########## Classifier ##########
-        drug_embedding = drug_embedding * drug_masks_
-        prot_embedding = prot_embedding * prot_masks_
-        drug_embedding = drug_embedding * drug_z[:, :, 1].unsqueeze(-1)
-        prot_embedding = prot_embedding * prot_z[:, :, 1].unsqueeze(-1)
-        drug_enc_outputs = self.drug_encoder(drug_embedding)
-        drug_enc_outputs = drug_enc_outputs * drug_masks_ + (1. - drug_masks_) * (-1e6)
-        prot_enc_outputs = self.prot_encoder(prot_embedding)
-        prot_enc_outputs = prot_enc_outputs * prot_masks_ + (1. - prot_masks_) * (-1e6)
+        embeddings = embeddings * masks_
+
+        embeddings = embeddings * z[:, :, 1].unsqueeze(-1)
+        enc_outputs = self.encoder(embeddings)  # (batch_size, seq_length, hidden_dim)
+        enc_outputs = enc_outputs * masks_ + (1. - masks_) * (-1e6)
         
-        cls_outputs = self._get_combine_output(drug_enc_outputs, prot_enc_outputs)
+        enc_outputs = torch.transpose(enc_outputs, 1, 2)
+        cls_outputs, _ = torch.max(enc_outputs, axis=2)
         # shape -- (batch_size, num_classes)
         cls_logits = self.cls_fc(cls_outputs)
         # shape -- (batch_size, num_classes)

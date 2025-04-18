@@ -27,22 +27,16 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
         inputs, org_masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.type(torch.float).to(device)
 
         #train classification
-        drug_rationales, prot_rationales, drug_masks, prot_masks = model.get_rationale(inputs, org_masks)
+        rationales,masks = model.get_rationale(inputs, org_masks)
 
-        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            drug_rationales[:, :, 1], drug_masks, args.sparsity_percentage)
-        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
-            prot_rationales[:, :, 1], prot_masks, args.sparsity_percentage)
-        sparsity_loss = drug_sparsity_loss + prot_sparsity_loss
+        sparsity_loss = args.sparsity_lambda * get_sparsity_loss(
+            rationales[:, :, 1], masks, args.sparsity_percentage)
 
-        train_sp.append((torch.sum(drug_rationales[:, :, 1]) / torch.sum(drug_masks)).cpu().item() + 
-                        (torch.sum(prot_rationales[:, :, 1]) / torch.sum(prot_masks)).cpu().item())
+        train_sp.append((torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item())
 
-        drug_continuity_loss = args.continuity_lambda * get_continuity_loss(drug_rationales[:, :, 1])
-        prot_continuity_loss = args.continuity_lambda * get_continuity_loss(prot_rationales[:, :, 1])
-        continuity_loss = drug_continuity_loss + prot_continuity_loss
+        continuity_loss = args.continuity_lambda * get_continuity_loss(rationales[:, :, 1])
 
-        forward_logit = model.pred_forward_logit(inputs, org_masks, torch.detach(drug_rationales), torch.detach(prot_rationales))
+        forward_logit = model.pred_forward_logit(inputs, org_masks, torch.detach(rationales))
         full_text_logits = model.train_one_step(inputs, org_masks)
 
         cls_loss = args.cls_lambda * cross_entropy_logits(forward_logit, labels)[1]
@@ -78,10 +72,10 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
                 p.requires_grad = False
         #print('freeze name1={},name2={},name3={},name4={},name5={},name6={}'.format(name1, name2, name3, name4, name5, name6))
         
-        drug_rationales, prot_rationales, drug_masks, prot_masks = model.get_rationale(inputs, org_masks)
+        rationales, masks = model.get_rationale(inputs, org_masks)
         #rationales, masks = model.get_rationale(inputs, org_masks)
 
-        forward_logit = model.pred_forward_logit(inputs, org_masks, drug_rationales, prot_rationales)
+        forward_logit = model.pred_forward_logit(inputs, org_masks, rationales)
         full_text_logits = model.train_one_step(inputs, org_masks)
         if args.div=='js':
             jsd_func = JS_DIV()
@@ -90,16 +84,11 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
             jsd_loss=nn.functional.kl_div(F.softmax(forward_logit,dim=-1).log(), 
                                           F.softmax(full_text_logits,dim=-1), reduction='batchmean')
 
-        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(drug_rationales[:, :, 1], masks, args.sparsity_percentage)
-        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(prot_rationales[:, :, 1], masks, args.sparsity_percentage)
-        sparsity_loss = drug_sparsity_loss + prot_sparsity_loss
+        sparsity_loss = args.sparsity_lambda * get_sparsity_loss(rationales[:, :, 1], masks, args.sparsity_percentage)
         
-        train_sp.append((torch.sum(drug_rationales[:, :, 1]) / torch.sum(drug_masks)).cpu().item() + 
-                        (torch.sum(prot_rationales[:, :, 1]) / torch.sum(prot_masks)).cpu().item())
+        train_sp.append((torch.sum(rationales[:, :, 1]) / torch.sum(masks)).cpu().item())
 
-        drug_continuity_loss = args.continuity_lambda * get_continuity_loss(drug_rationales[:, :, 1])
-        prot_continuity_loss = args.continuity_lambda * get_continuity_loss(prot_rationales[:, :, 1])
-        continuity_loss = drug_continuity_loss + prot_continuity_loss
+        continuity_loss = args.continuity_lambda * get_continuity_loss(rationales[:, :, 1])
     
         gen_loss = sparsity_loss + continuity_loss + jsd_loss
         gen_losses.append(gen_loss.cpu().detach().numpy())
@@ -117,7 +106,7 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
                 p.requires_grad = True
                 n1+=1
         for idx,p in model.encoder.named_parameters():
-            if idx in name1:
+            if idx in name2:
                 p.requires_grad=True
                 n2+=1
         for idx,p in model.cls_fc.named_parameters():
