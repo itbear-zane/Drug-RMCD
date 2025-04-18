@@ -64,17 +64,22 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
         name1=[]
         name2=[]
         name3=[]
+        name4=[]
         for idx, p in model.embedding_layer.named_parameters():
             if p.requires_grad == True:
                 name1.append(idx)
                 p.requires_grad = False
-        for idx,p in model.encoder.named_parameters():
+        for idx,p in model.drug_encoder.named_parameters():
             if p.requires_grad==True:
                 name2.append(idx)
                 p.requires_grad=False
+        for idx,p in model.prot_encoder.named_parameters():
+            if p.requires_grad==True:
+                name3.append(idx)
+                p.requires_grad=False
         for idx,p in model.cls_fc.named_parameters():
             if p.requires_grad == True:
-                name3.append(idx)
+                name4.append(idx)
                 p.requires_grad = False
         #print('freeze name1={},name2={},name3={},name4={},name5={},name6={}'.format(name1, name2, name3, name4, name5, name6))
         
@@ -90,8 +95,8 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
             jsd_loss=nn.functional.kl_div(F.softmax(forward_logit,dim=-1).log(), 
                                           F.softmax(full_text_logits,dim=-1), reduction='batchmean')
 
-        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(drug_rationales[:, :, 1], masks, args.sparsity_percentage)
-        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(prot_rationales[:, :, 1], masks, args.sparsity_percentage)
+        drug_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(drug_rationales[:, :, 1], drug_masks, args.sparsity_percentage)
+        prot_sparsity_loss = args.sparsity_lambda * get_sparsity_loss(prot_rationales[:, :, 1], prot_masks, args.sparsity_percentage)
         sparsity_loss = drug_sparsity_loss + prot_sparsity_loss
         
         train_sp.append((torch.sum(drug_rationales[:, :, 1]) / torch.sum(drug_masks)).cpu().item() + 
@@ -111,19 +116,24 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
         n1=0
         n2=0
         n3=0
+        n4=0
         #############recover the parameters#############
         for idx, p in model.embedding_layer.named_parameters():
             if idx in name1:
                 p.requires_grad = True
                 n1+=1
-        for idx,p in model.encoder.named_parameters():
+        for idx,p in model.drug_encoder.named_parameters():
             if idx in name2:
                 p.requires_grad=True
                 n2+=1
-        for idx,p in model.cls_fc.named_parameters():
+        for idx,p in model.prot_encoder.named_parameters():
             if idx in name3:
                 p.requires_grad=True
                 n3+=1
+        for idx,p in model.cls_fc.named_parameters():
+            if idx in name4:
+                p.requires_grad=True
+                n4+=1
         #print('recover n1={},n2={},n3={},n4={},n5={},n6={}'.format(n1, n2, n3, n4, n5, n6))
         
         cls_l += cls_loss.cpu().item()
@@ -152,7 +162,7 @@ def evaluate(model, dataloader, device, mode=None):
         for (_, (inputs, masks, labels)) in enumerate(dataloader):
             # inputs, masks, labels = inputs.to(device), masks.to(device), labels.to(device)
             inputs, masks, labels = [item.to(device) for item in inputs], [item.to(device) for item in masks], labels.to(device)
-            _, logits = model(inputs, masks)
+            _, _, logits = model(inputs, masks)
             # pdb.set_trace()
             n, loss = cross_entropy_logits(logits, labels)
             test_losses.append(loss.cpu().detach().numpy())
