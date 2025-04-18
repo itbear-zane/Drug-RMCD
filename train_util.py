@@ -117,7 +117,7 @@ def train_one_epoch(model, opt_gen, opt_pred, opt_embedding, dataset, device, ep
                 p.requires_grad = True
                 n1+=1
         for idx,p in model.encoder.named_parameters():
-            if idx in name1:
+            if idx in name2:
                 p.requires_grad=True
                 n2+=1
         for idx,p in model.cls_fc.named_parameters():
