@@ -42,7 +42,7 @@ python main.py \
     --lr1 0.0001 \
     --lr2 0.0001 \
     --lr3 0.0001 \
-    --batch_size 16 \
+    --batch_size 128 \
     #--sparsity_percentage 0.175 \
     --epochs 150 \
     --embedding_dim 128 \

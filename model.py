@@ -312,27 +312,29 @@ class Classifier(nn.Module):
 
 
 class DrugEmbedding(nn.Module):
-    def __init__(self, drug_pretrained_dim = 768, prot_pretrained_dim = 1024, embedding_dim = 512, num_heads = 4):
+    def __init__(self, args):
         super().__init__()
         """Constructor for the model."""
         
         self.drug_project = Projector(
-            input_dim = drug_pretrained_dim,
-            out_dim = embedding_dim,
+            input_dim = args.drug_pretrained_dim,
+            out_dim = args.embedding_dim,
             activation_fn = 'relu'
         )
 
         self.prot_project = Projector(
-            input_dim = prot_pretrained_dim,
-            out_dim = embedding_dim,
+            input_dim = args.prot_pretrained_dim,
+            out_dim = args.embedding_dim,
             activation_fn = 'relu'
         )
 
-        self.bi_attention = BiAttentionBlock(
-            v_dim=embedding_dim,
-            l_dim=embedding_dim,
-            embed_dim=embedding_dim,
-            num_heads=num_heads,
+        self.bi_attention_layers = nn.ModuleList(
+            BiAttentionBlock( 
+                v_dim=args.embedding_dim,
+                l_dim=args.embedding_dim,
+                embed_dim=args.embedding_dim,
+                num_heads=args.num_heads,
+            ) for _ in range(args.num_layers) # num_layers
         )
     
     def forward(self, inputs, masks):
@@ -341,8 +343,8 @@ class DrugEmbedding(nn.Module):
         drug_embed = self.drug_project(drug_embed)
         prot_embed = self.prot_project(prot_embed)
 
-        drug_embed, prot_embed = self.bi_attention(drug_embed, prot_embed, ~drug_mask.bool(), ~prot_mask.bool())
-        
+        for bi_attention in self.bi_attention_layers:
+            drug_embed, prot_embed = bi_attention(drug_embed, prot_embed, ~drug_mask.bool(), ~prot_mask.bool())
         # print(torch.any(torch.isnan(drug_embed)).item(), torch.any(torch.isnan(prot_embed)).item())
         # print("-" * 20)
 
@@ -352,7 +354,7 @@ class DrugRMCD(nn.Module):
     def __init__(self, args):
         super(DrugRMCD, self).__init__()
         self.args = args
-        self.embedding_layer = DrugEmbedding(embedding_dim=args.embedding_dim, num_heads=args.num_heads)
+        self.embedding_layer = DrugEmbedding(args)
 
         self.drug_generator = self._init_generator(args)
         self.prot_generator = self._init_generator(args)

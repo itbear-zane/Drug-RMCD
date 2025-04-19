@@ -17,10 +17,12 @@ def parse():
     parser.add_argument("--model_save_dir", type=Path, default=f"/home_data/home/yangjie2024/dti/Drug-RMCD/checkpoints/")
     parser.add_argument('--seed', type=int, default=42, help='random seed')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size [default: 100]')
-    parser.add_argument('--num_workers', type=int, default=5, help='Num workers [default: 5]')
+    parser.add_argument('--num_workers', type=int, default=7, help='Num workers [default: 5]')
 
     # model parameters
-    parser.add_argument('--num_layers', type=int, default=1, help='Num layers of TransformerEncoder Layer')
+    parser.add_argument('--drug_pretrained_dim', type=int, default=768)
+    parser.add_argument('--prot_pretrained_dim', type=int, default=1024)
+    parser.add_argument('--num_layers', type=int, default=3, help='Num layers of TransformerEncoder Layer')
     parser.add_argument('--embedding_dim', type=int, default=128, help='Embedding dims [default: 128]')
     parser.add_argument('--dim_feedforward', type=int, default=512, help='Dim of feedforward layer')
     parser.add_argument('--num_heads', type=int, default=4, help='Num attention heads of transformer layer')
@@ -30,7 +32,7 @@ def parse():
     parser.add_argument('--num_class', type=int, default=2, help='Num of classes [default: 1]')
 
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate [default: 0.2]')
-    parser.add_argument('--div', type=str, default='kl', help='kl loss')
+    parser.add_argument('--div', type=str, default='js', help='kl loss or js loss')
 
     # learning parameters
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epoch')
@@ -38,10 +40,10 @@ def parse():
     parser.add_argument('--lr1', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
     parser.add_argument('--lr2', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
     parser.add_argument('--lr3', type=float, default=0.0001, help='Learning rate [default: 1e-3]')
-    parser.add_argument('--sparsity_lambda', type=float, default=6., help='Sparsity trade-off [default: 1.]')
-    parser.add_argument('--continuity_lambda', type=float, default=6., help='Continuity trade-off [default: 4.]')
-    parser.add_argument('--sparsity_percentage', type=float, default=0.1, help='Sparsity percentage [default: .2]')
-    parser.add_argument('--cls_lambda', type=float, default=0.9, help='lambda for classification loss')
+    parser.add_argument('--sparsity_lambda', type=float, default=1., help='Sparsity trade-off [default: 1.]')
+    parser.add_argument('--continuity_lambda', type=float, default=4., help='Continuity trade-off [default: 4.]')
+    parser.add_argument('--sparsity_percentage', type=float, default=0.2, help='Sparsity percentage [default: .2]')
+    parser.add_argument('--cls_lambda', type=float, default=1., help='lambda for classification loss')
  
     args = parser.parse_args()
     return args
@@ -52,7 +54,7 @@ set_seed(args.seed)
 logger = construct_logger(args.logger_dir)
 
 # load dataset
-train_loader, val_loader, test_loader = get_dataloader('biosnap', 'random', batch_size=args.batch_size, num_workers=args.num_workers)
+train_loader, val_loader, test_loader = get_dataloader('biosnap', 'cluster', batch_size=args.batch_size, num_workers=args.num_workers)
 
 # load model
 model=DrugRMCD(args)
